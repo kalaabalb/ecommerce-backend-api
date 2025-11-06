@@ -16,32 +16,37 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Enhanced file filter with better debugging
+// Enhanced file filter that accepts Flutter's octet-stream
 const createFileFilter = (type) => {
   return function (req, file, cb) {
     const filetypes = /jpeg|jpg|png|webp/;
     const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
     const mimetype = filetypes.test(file.mimetype);
+    
+    // Allow octet-stream for Flutter file uploads
+    const isOctetStream = file.mimetype === 'application/octet-stream';
+    const hasValidExtension = extname;
 
     console.log(`📁 ${type} File upload check:`, {
       originalname: file.originalname,
       mimetype: file.mimetype,
       extname: path.extname(file.originalname),
       extnameValid: extname,
-      mimetypeValid: mimetype
+      mimetypeValid: mimetype,
+      isOctetStream: isOctetStream
     });
 
-    if (mimetype && extname) {
+    if ((mimetype && extname) || (isOctetStream && hasValidExtension)) {
       console.log(`✅ ${type} File accepted:`, file.originalname);
       return cb(null, true);
     } else {
       console.log(`❌ ${type} File rejected:`, file.originalname, 'Mimetype:', file.mimetype, 'Extension:', path.extname(file.originalname));
-      cb(new Error(`Error: Only JPEG, JPG, PNG, WEBP files are allowed! Got: ${file.mimetype} with extension ${path.extname(file.originalname)}`));
+      cb(new Error(`Error: Only image files are allowed! Got: ${file.mimetype} with extension ${path.extname(file.originalname)}`));
     }
   };
 };
 
-// Cloudinary storage for categories
+// Cloudinary storage configurations (keep the rest the same)
 const storageCategory = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
@@ -64,7 +69,6 @@ const uploadCategory = multer({
   fileFilter: createFileFilter('Category')
 });
 
-// Cloudinary storage for products
 const storageProduct = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
@@ -88,7 +92,6 @@ const uploadProduct = multer({
   fileFilter: createFileFilter('Product')
 });
 
-// Cloudinary storage for posters
 const storagePoster = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
@@ -112,7 +115,6 @@ const uploadPosters = multer({
   fileFilter: createFileFilter('Poster')
 });
 
-// Cloudinary storage for payment proofs
 const storagePaymentProof = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
