@@ -10,7 +10,7 @@ dotenv.config();
 
 const app = express();
 
-// Rate limiting - FIXED for Vercel
+// FIXED Rate limiting for IPv6
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: process.env.NODE_ENV === 'production' ? 100 : 5000,
@@ -20,21 +20,25 @@ const limiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => {
-    // Use X-Forwarded-For header in Vercel
-    return req.headers['x-forwarded-for'] || req.ip;
+  keyGenerator: (req, res) => {
+    // Proper IPv6 handling for Render
+    const forwarded = req.headers['x-forwarded-for'];
+    if (forwarded) {
+      const ips = forwarded.split(',');
+      return ips[0].trim();
+    }
+    return req.socket.remoteAddress;
   }
 });
 
 app.use(limiter);
 
-// CORS configuration - UPDATED for Vercel
+// CORS configuration
 const allowedOrigins = process.env.NODE_ENV === 'production' 
   ? [
-      'https://ecommerce-backend-api.vercel.app',
-      'https://yonasmarketplace.store',
-      'http://localhost:*', // Allow localhost for testing
-      '*' // Allow all for now - tighten later
+      'https://yonasmarketplace-backend.onrender.com',
+      'http://localhost:*',
+      '*' // Allow all for now
     ]
   : [
       'http://localhost:*',
@@ -42,21 +46,18 @@ const allowedOrigins = process.env.NODE_ENV === 'production'
       'http://192.168.*:*',
       'http://127.0.0.1:*',
       'http://0.0.0.0:*',
-      'http://10.0.2.2:*', // Flutter Android emulator
-      '*' // Allow all in development
+      'http://10.0.2.2:*',
+      '*'
     ];
 
 app.use(cors({ 
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps, curl requests, Flutter apps)
     if (!origin) return callback(null, true);
     
-    // In development, allow all origins for testing
     if (process.env.NODE_ENV !== 'production') {
       return callback(null, true);
     }
     
-    // In production, use strict CORS
     if (allowedOrigins.some(pattern => {
       if (pattern.includes('*')) {
         const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
@@ -78,7 +79,7 @@ app.use(cors({
 // Handle preflight requests
 app.options('*', cors());
 
-// Security headers with Helmet - UPDATED for Vercel
+// Security headers
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
   contentSecurityPolicy: false,
@@ -89,23 +90,32 @@ app.use(helmet({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// MongoDB connection - FIXED for Vercel
+// MongoDB connection - FIXED for Render
 mongoose.set('strictQuery', true);
 
 const connectDB = async () => {
   try {
     console.log('🔗 Connecting to MongoDB Atlas...');
-    const mongoUrl = process.env.MONGO_URL || 'mongodb+srv://yonasmarketplace_db:DnO3zO2TtCRdin1f@market-cluster.zphhv9i.mongodb.net/rapid?retryWrites=true&w=majority';
+    
+    const mongoUrl = process.env.MONGO_URL;
+    
+    if (!mongoUrl) {
+      console.error('❌ MONGO_URL environment variable is missing');
+      return;
+    }
+    
+    // Log connection attempt (hide password)
+    console.log('Using MongoDB URL:', mongoUrl.replace(/mongodb\+srv:\/\/([^:]+):([^@]+)/, 'mongodb+srv://$1:****'));
     
     await mongoose.connect(mongoUrl, {
-      serverSelectionTimeoutMS: 30000, // 30 seconds timeout
+      serverSelectionTimeoutMS: 30000,
       socketTimeoutMS: 45000,
       maxPoolSize: 10,
     });
     console.log('✅ Connected to MongoDB Atlas');
   } catch (error) {
     console.error('❌ Database connection failed:', error.message);
-    // Don't exit process on Vercel - let it handle reconnections
+    console.log('💡 Check your MONGO_URL environment variable');
   }
 };
 
@@ -158,7 +168,7 @@ app.get('/health', asyncHandler(async (req, res) => {
       environment: process.env.NODE_ENV || 'development',
       cors: 'enabled',
       rateLimit: 'enabled',
-      platform: 'Vercel'
+      platform: 'Render'
     }
   });
 }));
@@ -167,12 +177,12 @@ app.get('/health', asyncHandler(async (req, res) => {
 app.get('/', asyncHandler(async (req, res) => {
   res.json({ 
     success: true, 
-    message: 'API working successfully on Vercel', 
+    message: 'API working successfully on Render', 
     data: {
       version: '1.0.0',
       environment: process.env.NODE_ENV || 'development',
       database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-      platform: 'Vercel Serverless'
+      platform: 'Render'
     }
   });
 }));
@@ -188,7 +198,7 @@ const initializeSuperAdmin = async () => {
     if (!superAdminExists) {
       const superAdmin = new AdminUser({
         username: 'superadmin',
-        password: 'admin123', // Change this in production!
+        password: 'admin123',
         name: 'Super Administrator',
         email: 'superadmin@yourapp.com',
         clearanceLevel: 'super_admin'
@@ -281,6 +291,5 @@ app.use((error, req, res, next) => {
     ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
   });
 });
-
 
 module.exports = app;
