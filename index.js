@@ -10,7 +10,7 @@ dotenv.config();
 
 const app = express();
 
-
+// FIXED Rate limiting for IPv6
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: process.env.NODE_ENV === 'production' ? 100 : 5000,
@@ -30,6 +30,7 @@ const limiter = rateLimit({
     return req.socket.remoteAddress;
   }
 });
+
 app.use(limiter);
 
 // CORS configuration
@@ -37,7 +38,7 @@ const allowedOrigins = process.env.NODE_ENV === 'production'
   ? [
       'https://yonasmarketplace-backend.onrender.com',
       'http://localhost:*',
-      '*' // Allow all for now
+      '*' 
     ]
   : [
       'http://localhost:*',
@@ -117,6 +118,7 @@ const connectDB = async () => {
     console.log('💡 Check your MONGO_URL environment variable');
   }
 };
+
 connectDB();
 
 const db = mongoose.connection;
@@ -289,5 +291,18 @@ app.use((error, req, res, next) => {
     ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
   });
 });
+
+// Render port binding - FIXED
+const PORT = process.env.PORT || 3000;
+
+// Only listen if not in Vercel environment
+if (!process.env.VERCEL) {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`📊 Health check: http://localhost:${PORT}/health`);
+    console.log(`🔗 Render URL: https://yonasmarketplace-backend.onrender.com`);
+  });
+}
 
 module.exports = app;
