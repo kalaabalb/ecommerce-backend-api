@@ -10,7 +10,7 @@ dotenv.config();
 
 const app = express();
 
-// FIXED Rate limiting for IPv6
+
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: process.env.NODE_ENV === 'production' ? 100 : 5000,
@@ -29,8 +29,6 @@ const limiter = rateLimit({
     }
     return req.socket.remoteAddress;
   }
-});
-
 app.use(limiter);
 
 // CORS configuration
@@ -118,7 +116,6 @@ const connectDB = async () => {
     console.log('💡 Check your MONGO_URL environment variable');
   }
 };
-
 connectDB();
 
 const db = mongoose.connection;
