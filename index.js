@@ -29,6 +29,7 @@ const limiter = rateLimit({
     }
     return req.socket.remoteAddress;
   }
+});
 app.use(limiter);
 
 // CORS configuration
