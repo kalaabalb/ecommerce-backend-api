@@ -3,7 +3,6 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const asyncHandler = require('express-async-handler');
 const dotenv = require('dotenv');
-const path = require('path');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 
@@ -11,27 +10,31 @@ dotenv.config();
 
 const app = express();
 
-// Rate limiting - more permissive for development
+// Rate limiting - FIXED for Vercel
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'production' ? 100 : 5000, // Higher limit for development
+  max: process.env.NODE_ENV === 'production' ? 100 : 5000,
   message: {
     success: false,
     message: 'Too many requests from this IP, please try again later.'
   },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => {
+    // Use X-Forwarded-For header in Vercel
+    return req.headers['x-forwarded-for'] || req.ip;
+  }
 });
 
 app.use(limiter);
 
-// CORS configuration - Allow Flutter apps and common development origins
+// CORS configuration - UPDATED for Vercel
 const allowedOrigins = process.env.NODE_ENV === 'production' 
   ? [
-      'https://youradminapp.com', 
-      'https://yourcustomerapp.com',
-      'https://www.youradminapp.com',
-      'https://www.yourcustomerapp.com'
+      'https://ecommerce-backend-api.vercel.app',
+      'https://yonasmarketplace.store',
+      'http://localhost:*', // Allow localhost for testing
+      '*' // Allow all for now - tighten later
     ]
   : [
       'http://localhost:*',
@@ -39,12 +42,8 @@ const allowedOrigins = process.env.NODE_ENV === 'production'
       'http://192.168.*:*',
       'http://127.0.0.1:*',
       'http://0.0.0.0:*',
-      // Flutter Android emulator
-      'http://10.0.2.2:*',
-      // Flutter iOS simulator
-      'http://localhost:*',
-      // Allow all origins in development for testing
-      '*'
+      'http://10.0.2.2:*', // Flutter Android emulator
+      '*' // Allow all in development
     ];
 
 app.use(cors({ 
@@ -79,40 +78,34 @@ app.use(cors({
 // Handle preflight requests
 app.options('*', cors());
 
-// Security headers with Helmet - relaxed for development
+// Security headers with Helmet - UPDATED for Vercel
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
-  contentSecurityPolicy: false, // Disable CSP for development
+  contentSecurityPolicy: false,
   crossOriginEmbedderPolicy: false
 }));
 
 // Body parsing middleware
-app.use(express.json({ limit: '50mb' })); // Increased limit for image uploads
+app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Serve static files
-app.use('/image/products', express.static(path.join(__dirname, 'public/products')));
-app.use('/image/category', express.static(path.join(__dirname, 'public/category')));
-app.use('/image/poster', express.static(path.join(__dirname, 'public/posters')));  
-app.use('/image/payment-proofs', express.static(path.join(__dirname, 'public/payment-proofs')));
-app.use('/admin-users', require('./routes/adminUser'));
-
-// MongoDB connection with better error handling
+// MongoDB connection - FIXED for Vercel
 mongoose.set('strictQuery', true);
 
 const connectDB = async () => {
   try {
-    console.log('🔗 Connecting to MongoDB:', process.env.MONGO_URL ? 'URL provided' : 'No URL found');
-    await mongoose.connect(process.env.MONGO_URL, {
-      serverSelectionTimeoutMS: 10000, // Increased timeout
+    console.log('🔗 Connecting to MongoDB Atlas...');
+    const mongoUrl = process.env.MONGO_URL || 'mongodb+srv://yonasmarketplace_db:DnO3zO2TtCRdin1f@market-cluster.zphhv9i.mongodb.net/rapid?retryWrites=true&w=majority';
+    
+    await mongoose.connect(mongoUrl, {
+      serverSelectionTimeoutMS: 30000, // 30 seconds timeout
       socketTimeoutMS: 45000,
       maxPoolSize: 10,
     });
-    console.log('✅ Connected to Database');
+    console.log('✅ Connected to MongoDB Atlas');
   } catch (error) {
     console.error('❌ Database connection failed:', error.message);
-    console.log('💡 Check your .env file for MONGO_URL');
-    process.exit(1);
+    // Don't exit process on Vercel - let it handle reconnections
   }
 };
 
@@ -164,7 +157,8 @@ app.get('/health', asyncHandler(async (req, res) => {
       database: dbStatus,
       environment: process.env.NODE_ENV || 'development',
       cors: 'enabled',
-      rateLimit: 'enabled'
+      rateLimit: 'enabled',
+      platform: 'Vercel'
     }
   });
 }));
@@ -173,16 +167,17 @@ app.get('/health', asyncHandler(async (req, res) => {
 app.get('/', asyncHandler(async (req, res) => {
   res.json({ 
     success: true, 
-    message: 'API working successfully', 
+    message: 'API working successfully on Vercel', 
     data: {
       version: '1.0.0',
       environment: process.env.NODE_ENV || 'development',
-      database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+      database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+      platform: 'Vercel Serverless'
     }
   });
 }));
 
-// In your main server file, after database connection
+// Initialize super admin
 const initializeSuperAdmin = async () => {
   try {
     const AdminUser = require('./model/adminUser');
@@ -288,27 +283,4 @@ app.use((error, req, res, next) => {
 });
 
 
-
-// Graceful shutdown
-process.on('SIGINT', async () => {
-  console.log('Shutting down gracefully...');
-  await mongoose.connection.close();
-  console.log('MongoDB connection closed.');
-  process.exit(0);
-});
-
-process.on('SIGTERM', async () => {
-  console.log('Shutting down gracefully...');
-  await mongoose.connection.close();
-  console.log('MongoDB connection closed.');
-  process.exit(0);
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`📊 Health check: http://localhost:${PORT}/health`);
-  console.log(`🔗 Local network: http://10.161.175.199:${PORT}/health`);
-  console.log(`🔧 CORS: ${process.env.NODE_ENV === 'production' ? 'Strict' : 'Permissive'}`);
-});
+module.exports = app;
