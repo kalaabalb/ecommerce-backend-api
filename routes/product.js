@@ -13,7 +13,8 @@ router.get('/', asyncHandler(async (req, res) => {
         .populate('proSubCategoryId', 'id name')
         .populate('proBrandId', 'id name')
         .populate('proVariantTypeId', 'id type')
-        .populate('proVariantId', 'id name');
+        .populate('proVariantId', 'id name')
+        .populate('createdBy', 'username name');
         res.json({ success: true, message: "Products retrieved successfully.", data: products });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
@@ -29,7 +30,8 @@ router.get('/:id', asyncHandler(async (req, res) => {
             .populate('proSubCategoryId', 'id name')
             .populate('proBrandId', 'id name')
             .populate('proVariantTypeId', 'id name')
-            .populate('proVariantId', 'id name');
+            .populate('proVariantId', 'id name')
+            .populate('createdBy', 'username name');
         if (!product) {
             return res.status(404).json({ success: false, message: "Product not found." });
         }
@@ -64,7 +66,7 @@ router.post('/', asyncHandler(async (req, res) => {
             }
 
             // Extract product data from the request body
-            const { name, description, quantity, price, offerPrice, proCategoryId, proSubCategoryId, proBrandId, proVariantTypeId, proVariantId } = req.body;
+            const { name, description, quantity, price, offerPrice, proCategoryId, proSubCategoryId, proBrandId, proVariantTypeId, proVariantId, createdBy } = req.body;
 
             // Check if any required fields are missing
             if (!name || !quantity || !price || !proCategoryId || !proSubCategoryId) {
@@ -85,14 +87,32 @@ router.post('/', asyncHandler(async (req, res) => {
                 }
             });
 
+            // Check if at least one image is provided
+            if (imageUrls.length === 0) {
+                return res.status(400).json({ success: false, message: "At least one product image is required." });
+            }
+
             // Create a new product object with data
-            const newProduct = new Product({ name, description, quantity, price, offerPrice, proCategoryId, proSubCategoryId, proBrandId,proVariantTypeId, proVariantId, images: imageUrls });
+            const newProduct = new Product({ 
+                name, 
+                description, 
+                quantity, 
+                price, 
+                offerPrice, 
+                proCategoryId, 
+                proSubCategoryId, 
+                proBrandId,
+                proVariantTypeId, 
+                proVariantId, 
+                createdBy, // Include createdBy if provided
+                images: imageUrls 
+            });
 
             // Save the new product to the database
             await newProduct.save();
 
             // Send a success response back to the client
-            res.json({ success: true, message: "Product created successfully.", data: null });
+            res.json({ success: true, message: "Product created successfully.", data: newProduct });
         });
     } catch (error) {
         // Handle any errors that occur during the process
@@ -158,7 +178,7 @@ router.put('/:id', asyncHandler(async (req, res) => {
 
             // Save the updated product
             await productToUpdate.save();
-            res.json({ success: true, message: "Product updated successfully." });
+            res.json({ success: true, message: "Product updated successfully.", data: productToUpdate });
         });
     } catch (error) {
         console.error("Error updating product:", error);

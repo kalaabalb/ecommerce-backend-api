@@ -1,4 +1,3 @@
-// model/product.js - Updated version
 const mongoose = require('mongoose');
 
 const productSchema = new mongoose.Schema({
@@ -51,11 +50,11 @@ const productSchema = new mongoose.Schema({
             required: true
         }
     }],
-    // Add createdBy field to track who created this product
+    // Add createdBy field to track who created this product - MADE OPTIONAL
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'AdminUser',
-        required: true
+        ref: 'AdminUser'
+        // Removed: required: true
     }
 }, { timestamps: true });
 
