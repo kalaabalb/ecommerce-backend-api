@@ -1,5 +1,5 @@
-
 const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
 
 const adminUserSchema = new mongoose.Schema({
   username: {
@@ -41,6 +41,18 @@ const adminUserSchema = new mongoose.Schema({
 }, { 
   timestamps: true 
 });
+
+// Hash password before saving
+adminUserSchema.pre('save', async function(next) {
+  if (!this.isModified('password')) return next();
+  this.password = await bcrypt.hash(this.password, 12);
+  next();
+});
+
+// Compare password method
+adminUserSchema.methods.correctPassword = async function(candidatePassword) {
+  return await bcrypt.compare(candidatePassword, this.password);
+};
 
 // Index for better query performance
 adminUserSchema.index({ username: 1 });

@@ -27,8 +27,8 @@ router.post('/login', asyncHandler(async (req, res) => {
       return res.status(401).json({ success: false, message: "Invalid username or password." });
     }
 
-    // Plain text comparison (NOT RECOMMENDED FOR PRODUCTION)
-    if (adminUser.password !== password) {
+    // SECURE password comparison with bcrypt
+    if (!(await adminUser.correctPassword(password))) {
       return res.status(401).json({ success: false, message: "Invalid username or password." });
     }
 
@@ -118,7 +118,7 @@ router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
       username,
       name,
       email,
-      password, // In production, hash this password!
+      password, // Will be automatically hashed by the model pre-save hook
       clearanceLevel: clearanceLevel || 'admin',
       createdBy: req.admin._id
     });
@@ -148,7 +148,7 @@ router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
 
 // Update admin user
 router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
-  const { name, email, clearanceLevel, isActive } = req.body;
+  const { name, email, clearanceLevel, isActive, password } = req.body;
 
   try {
     // Only super admin can update other admin users
@@ -159,6 +159,7 @@ router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
     const updateData = {};
     if (name) updateData.name = name;
     if (email) updateData.email = email;
+    if (password) updateData.password = password; // Will be hashed automatically
     if (clearanceLevel && req.admin.clearanceLevel === 'super_admin') {
       updateData.clearanceLevel = clearanceLevel;
     }

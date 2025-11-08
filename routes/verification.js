@@ -118,15 +118,19 @@ router.post('/verify-email', asyncHandler(async (req, res) => {
 
     console.log('🟡 [SERVER] Email verified successfully for:', email);
     
+    const userResponse = {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        emailVerified: user.emailVerified,
+        phone: user.phone,
+        phoneVerified: user.phoneVerified
+    };
+    
     res.json({ 
       success: true, 
       message: "Email verified successfully.",
-      data: { 
-        userId: user._id,
-        email: user.email,
-        name: user.name,
-        emailVerified: user.emailVerified
-      }
+      data: userResponse
     });
   } catch (error) {
     console.error('🔴 [SERVER] Error verifying email:', error);
@@ -223,7 +227,7 @@ router.post('/reset-password', asyncHandler(async (req, res) => {
     }
 
     // Update password and clear verification code
-    user.password = newPassword;
+    user.password = newPassword; // Will be hashed automatically
     user.verificationCode = null;
     user.codeExpires = null;
     await user.save();
@@ -258,10 +262,10 @@ router.put('/update-profile/:id', asyncHandler(async (req, res) => {
       if (!currentPassword) {
         return res.status(400).json({ success: false, message: "Current password is required to set new password." });
       }
-      if (user.password !== currentPassword) {
+      if (!(await user.correctPassword(currentPassword))) {
         return res.status(400).json({ success: false, message: "Current password is incorrect." });
       }
-      user.password = newPassword;
+      user.password = newPassword; // Will be hashed automatically
     }
 
     // Update email if provided and different
@@ -273,10 +277,18 @@ router.put('/update-profile/:id', asyncHandler(async (req, res) => {
     user.name = name;
     await user.save();
 
+    const userResponse = {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        emailVerified: user.emailVerified,
+        updatedAt: user.updatedAt
+    };
+
     res.json({ 
       success: true, 
       message: "Profile updated successfully." + (email && email !== user.email ? " Please verify your new email." : ""),
-      data: user 
+      data: userResponse 
     });
   } catch (error) {
     if (error.code === 11000) {
