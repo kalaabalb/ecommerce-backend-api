@@ -41,10 +41,11 @@ router.get('/:id', asyncHandler(async (req, res) => {
     }
 }));
 
-// create new product with Cloudinary
+// Create new product with Cloudinary - FIXED VERSION
 router.post('/', asyncHandler(async (req, res) => {
     try {
-        // Execute the Multer middleware to handle multiple file fields
+        console.log('🔄 [PRODUCT] Starting product creation process...');
+        
         uploadProduct.fields([
             { name: 'image1', maxCount: 1 },
             { name: 'image2', maxCount: 1 },
@@ -52,80 +53,131 @@ router.post('/', asyncHandler(async (req, res) => {
             { name: 'image4', maxCount: 1 },
             { name: 'image5', maxCount: 1 }
         ])(req, res, async function (err) {
+            // FIXED: Proper error handling with status codes
             if (err instanceof multer.MulterError) {
-                // Handle Multer errors, if any
+                console.error('❌ [PRODUCT] Multer Error:', err);
                 if (err.code === 'LIMIT_FILE_SIZE') {
-                    err.message = 'File size is too large. Maximum filesize is 5MB per image.';
+                    return res.status(400).json({ 
+                        success: false, 
+                        message: 'File size is too large. Maximum filesize is 5MB per image.' 
+                    });
                 }
-                console.log(`Add product: ${err}`);
-                return res.json({ success: false, message: err.message });
+                return res.status(400).json({ 
+                    success: false, 
+                    message: `File upload error: ${err.message}` 
+                });
             } else if (err) {
-                // Handle other errors, if any
-                console.log(`Add product: ${err}`);
-                return res.json({ success: false, message: err.message });
+                console.error('❌ [PRODUCT] Upload Error:', err);
+                return res.status(500).json({ 
+                    success: false, 
+                    message: `Upload failed: ${err.message}` 
+                });
             }
 
-            // Extract product data from the request body
-            const { name, description, quantity, price, offerPrice, proCategoryId, proSubCategoryId, proBrandId, proVariantTypeId, proVariantId, createdBy } = req.body;
+            console.log('✅ [PRODUCT] Files processed successfully');
+            console.log('📦 [PRODUCT] Request body:', req.body);
+            console.log('🖼️ [PRODUCT] Uploaded files:', req.files);
 
-            // Check if any required fields are missing
-            if (!name || !quantity || !price || !proCategoryId || !proSubCategoryId) {
-                return res.status(400).json({ success: false, message: "Required fields are missing." });
-            }
+            try {
+                // Extract product data from the request body
+                const { 
+                    name, 
+                    description, 
+                    quantity, 
+                    price, 
+                    offerPrice, 
+                    proCategoryId, 
+                    proSubCategoryId, 
+                    proBrandId, 
+                    proVariantTypeId, 
+                    proVariantId, 
+                    createdBy 
+                } = req.body;
 
-            // Initialize an array to store image URLs
-            const imageUrls = [];
-
-            // Iterate over the file fields
-            const fields = ['image1', 'image2', 'image3', 'image4', 'image5'];
-            fields.forEach((field, index) => {
-                if (req.files[field] && req.files[field].length > 0) {
-                    const file = req.files[field][0];
-                    // Cloudinary provides the URL directly in file.path
-                    const imageUrl = file.path;
-                    imageUrls.push({ image: index + 1, url: imageUrl });
+                // Validate required fields
+                if (!name || !quantity || !price || !proCategoryId || !proSubCategoryId) {
+                    console.log('❌ [PRODUCT] Missing required fields');
+                    return res.status(400).json({ 
+                        success: false, 
+                        message: "Name, quantity, price, category, and subcategory are required." 
+                    });
                 }
-            });
 
-            // Check if at least one image is provided
-            if (imageUrls.length === 0) {
-                return res.status(400).json({ success: false, message: "At least one product image is required." });
+                // Initialize an array to store image URLs
+                const imageUrls = [];
+
+                // Iterate over the file fields
+                const fields = ['image1', 'image2', 'image3', 'image4', 'image5'];
+                fields.forEach((field, index) => {
+                    if (req.files[field] && req.files[field].length > 0) {
+                        const file = req.files[field][0];
+                        // Cloudinary provides the URL directly in file.path
+                        const imageUrl = file.path;
+                        console.log(`🖼️ [PRODUCT] ${field} uploaded to: ${imageUrl}`);
+                        imageUrls.push({ image: index + 1, url: imageUrl });
+                    }
+                });
+
+                // Check if at least one image is provided
+                if (imageUrls.length === 0) {
+                    console.log('❌ [PRODUCT] No images provided');
+                    return res.status(400).json({ 
+                        success: false, 
+                        message: "At least one product image is required." 
+                    });
+                }
+
+                console.log('💾 [PRODUCT] Creating product in database...');
+                
+                // Create a new product object with data
+                const newProduct = new Product({ 
+                    name, 
+                    description, 
+                    quantity: parseInt(quantity),
+                    price: parseFloat(price),
+                    offerPrice: offerPrice ? parseFloat(offerPrice) : undefined,
+                    proCategoryId, 
+                    proSubCategoryId, 
+                    proBrandId,
+                    proVariantTypeId, 
+                    proVariantId: proVariantId ? (Array.isArray(proVariantId) ? proVariantId : [proVariantId]) : [],
+                    createdBy,
+                    images: imageUrls 
+                });
+
+                await newProduct.save();
+                console.log('✅ [PRODUCT] Product created successfully:', newProduct._id);
+
+                res.json({ 
+                    success: true, 
+                    message: "Product created successfully.", 
+                    data: newProduct 
+                });
+
+            } catch (dbError) {
+                console.error('❌ [PRODUCT] Database Error:', dbError);
+                res.status(500).json({ 
+                    success: false, 
+                    message: `Database error: ${dbError.message}` 
+                });
             }
-
-            // Create a new product object with data
-            const newProduct = new Product({ 
-                name, 
-                description, 
-                quantity, 
-                price, 
-                offerPrice, 
-                proCategoryId, 
-                proSubCategoryId, 
-                proBrandId,
-                proVariantTypeId, 
-                proVariantId, 
-                createdBy, // Include createdBy if provided
-                images: imageUrls 
-            });
-
-            // Save the new product to the database
-            await newProduct.save();
-
-            // Send a success response back to the client
-            res.json({ success: true, message: "Product created successfully.", data: newProduct });
         });
-    } catch (error) {
-        // Handle any errors that occur during the process
-        console.error("Error creating product:", error);
-        res.status(500).json({ success: false, message: error.message });
+
+    } catch (outerError) {
+        console.error('❌ [PRODUCT] Outer Catch Error:', outerError);
+        res.status(500).json({ 
+            success: false, 
+            message: `Server error: ${outerError.message}` 
+        });
     }
 }));
 
-// Update a product with Cloudinary
+// Update a product with Cloudinary - FIXED VERSION
 router.put('/:id', asyncHandler(async (req, res) => {
     const productId = req.params.id;
     try {
-        // Execute the Multer middleware to handle file fields
+        console.log('🔄 [PRODUCT] Starting product update for ID:', productId);
+        
         uploadProduct.fields([
             { name: 'image1', maxCount: 1 },
             { name: 'image2', maxCount: 1 },
@@ -133,55 +185,83 @@ router.put('/:id', asyncHandler(async (req, res) => {
             { name: 'image4', maxCount: 1 },
             { name: 'image5', maxCount: 1 }
         ])(req, res, async function (err) {
-            if (err) {
-                console.log(`Update product: ${err}`);
-                return res.status(500).json({ success: false, message: err.message });
-            }
-
-            const { name, description, quantity, price, offerPrice, proCategoryId, proSubCategoryId, proBrandId, proVariantTypeId, proVariantId } = req.body;
-
-            // Find the product by ID
-            const productToUpdate = await Product.findById(productId);
-            if (!productToUpdate) {
-                return res.status(404).json({ success: false, message: "Product not found." });
-            }
-
-            // Update product properties if provided
-            productToUpdate.name = name || productToUpdate.name;
-            productToUpdate.description = description || productToUpdate.description;
-            productToUpdate.quantity = quantity || productToUpdate.quantity;
-            productToUpdate.price = price || productToUpdate.price;
-            productToUpdate.offerPrice = offerPrice || productToUpdate.offerPrice;
-            productToUpdate.proCategoryId = proCategoryId || productToUpdate.proCategoryId;
-            productToUpdate.proSubCategoryId = proSubCategoryId || productToUpdate.proSubCategoryId;
-            productToUpdate.proBrandId = proBrandId || productToUpdate.proBrandId;
-            productToUpdate.proVariantTypeId = proVariantTypeId || productToUpdate.proVariantTypeId;
-            productToUpdate.proVariantId = proVariantId || productToUpdate.proVariantId;
-
-            // Iterate over the file fields to update images
-            const fields = ['image1', 'image2', 'image3', 'image4', 'image5'];
-            fields.forEach((field, index) => {
-                if (req.files[field] && req.files[field].length > 0) {
-                    const file = req.files[field][0];
-                    // Cloudinary provides the URL directly in file.path
-                    const imageUrl = file.path;
-                    // Update the specific image URL in the images array
-                    let imageEntry = productToUpdate.images.find(img => img.image === (index + 1));
-                    if (imageEntry) {
-                        imageEntry.url = imageUrl;
-                    } else {
-                        // If the image entry does not exist, add it
-                        productToUpdate.images.push({ image: index + 1, url: imageUrl });
-                    }
+            // FIXED: Proper error handling
+            if (err instanceof multer.MulterError) {
+                console.error('❌ [PRODUCT] Multer Error:', err);
+                if (err.code === 'LIMIT_FILE_SIZE') {
+                    return res.status(400).json({ 
+                        success: false, 
+                        message: 'File size is too large. Maximum filesize is 5MB per image.' 
+                    });
                 }
-            });
+                return res.status(400).json({ 
+                    success: false, 
+                    message: `File upload error: ${err.message}` 
+                });
+            } else if (err) {
+                console.error('❌ [PRODUCT] Upload Error:', err);
+                return res.status(500).json({ 
+                    success: false, 
+                    message: `Upload failed: ${err.message}` 
+                });
+            }
 
-            // Save the updated product
-            await productToUpdate.save();
-            res.json({ success: true, message: "Product updated successfully.", data: productToUpdate });
+            try {
+                const { name, description, quantity, price, offerPrice, proCategoryId, proSubCategoryId, proBrandId, proVariantTypeId, proVariantId } = req.body;
+
+                // Find the product by ID
+                const productToUpdate = await Product.findById(productId);
+                if (!productToUpdate) {
+                    return res.status(404).json({ success: false, message: "Product not found." });
+                }
+
+                // Update product properties if provided
+                if (name) productToUpdate.name = name;
+                if (description) productToUpdate.description = description;
+                if (quantity) productToUpdate.quantity = parseInt(quantity);
+                if (price) productToUpdate.price = parseFloat(price);
+                if (offerPrice) productToUpdate.offerPrice = parseFloat(offerPrice);
+                if (proCategoryId) productToUpdate.proCategoryId = proCategoryId;
+                if (proSubCategoryId) productToUpdate.proSubCategoryId = proSubCategoryId;
+                if (proBrandId) productToUpdate.proBrandId = proBrandId;
+                if (proVariantTypeId) productToUpdate.proVariantTypeId = proVariantTypeId;
+                if (proVariantId) productToUpdate.proVariantId = Array.isArray(proVariantId) ? proVariantId : [proVariantId];
+
+                // Iterate over the file fields to update images
+                const fields = ['image1', 'image2', 'image3', 'image4', 'image5'];
+                fields.forEach((field, index) => {
+                    if (req.files[field] && req.files[field].length > 0) {
+                        const file = req.files[field][0];
+                        const imageUrl = file.path;
+                        console.log(`🖼️ [PRODUCT] Updating ${field} to: ${imageUrl}`);
+                        
+                        let imageEntry = productToUpdate.images.find(img => img.image === (index + 1));
+                        if (imageEntry) {
+                            imageEntry.url = imageUrl;
+                        } else {
+                            productToUpdate.images.push({ image: index + 1, url: imageUrl });
+                        }
+                    }
+                });
+
+                await productToUpdate.save();
+                console.log('✅ [PRODUCT] Product updated successfully:', productId);
+                
+                res.json({ 
+                    success: true, 
+                    message: "Product updated successfully.", 
+                    data: productToUpdate 
+                });
+            } catch (dbError) {
+                console.error('❌ [PRODUCT] Database Error:', dbError);
+                res.status(500).json({ 
+                    success: false, 
+                    message: `Database error: ${dbError.message}` 
+                });
+            }
         });
     } catch (error) {
-        console.error("Error updating product:", error);
+        console.error("❌ [PRODUCT] Outer Error:", error);
         res.status(500).json({ success: false, message: error.message });
     }
 }));

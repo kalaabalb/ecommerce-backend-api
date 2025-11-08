@@ -173,6 +173,38 @@ app.get('/health', asyncHandler(async (req, res) => {
   });
 }));
 
+// Test Cloudinary connection - ADD THIS ENDPOINT
+app.get('/test-cloudinary', asyncHandler(async (req, res) => {
+  try {
+    console.log('🧪 Testing Cloudinary connection...');
+    const cloudinary = require('cloudinary').v2;
+    
+    // Test upload a small image
+    const result = await cloudinary.uploader.upload(
+      'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMSIgaGVpZ2h0PSIxIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjwvc3ZnPg==',
+      { folder: 'test' }
+    );
+    
+    console.log('✅ Cloudinary test successful:', result);
+    res.json({ 
+      success: true, 
+      message: 'Cloudinary connected and working',
+      result: {
+        public_id: result.public_id,
+        url: result.secure_url,
+        format: result.format
+      }
+    });
+  } catch (error) {
+    console.error('❌ Cloudinary test failed:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Cloudinary connection failed',
+      error: error.message 
+    });
+  }
+}));
+
 // Test route
 app.get('/', asyncHandler(async (req, res) => {
   res.json({ 
@@ -238,7 +270,8 @@ app.use('*', (req, res) => {
       '/posters',
       '/users',
       '/orders',
-      '/health'
+      '/health',
+      '/test-cloudinary'
     ]
   });
 });
