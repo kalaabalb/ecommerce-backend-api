@@ -10,7 +10,7 @@ dotenv.config();
 
 const app = express();
 
-// FIXED Rate limiting for IPv6
+// Rate limiting for IPv6
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: process.env.NODE_ENV === 'production' ? 100 : 5000,
@@ -21,7 +21,6 @@ const limiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req, res) => {
-    // Proper IPv6 handling for Render
     const forwarded = req.headers['x-forwarded-for'];
     if (forwarded) {
       const ips = forwarded.split(',');
@@ -67,7 +66,6 @@ app.use(cors({
     })) {
       callback(null, true);
     } else {
-      console.log('CORS blocked origin:', origin);
       callback(new Error('Not allowed by CORS'));
     }
   },
@@ -90,32 +88,26 @@ app.use(helmet({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// MongoDB connection - FIXED for Render
+// MongoDB connection
 mongoose.set('strictQuery', true);
 
 const connectDB = async () => {
   try {
-    console.log('🔗 Connecting to MongoDB Atlas...');
-    
     const mongoUrl = process.env.MONGO_URL;
     
     if (!mongoUrl) {
-      console.error('❌ MONGO_URL environment variable is missing');
+      console.error('MONGO_URL environment variable is missing');
       return;
     }
-    
-    // Log connection attempt (hide password)
-    console.log('Using MongoDB URL:', mongoUrl.replace(/mongodb\+srv:\/\/([^:]+):([^@]+)/, 'mongodb+srv://$1:****'));
     
     await mongoose.connect(mongoUrl, {
       serverSelectionTimeoutMS: 30000,
       socketTimeoutMS: 45000,
       maxPoolSize: 10,
     });
-    console.log('✅ Connected to MongoDB Atlas');
+    console.log('Connected to MongoDB Atlas');
   } catch (error) {
-    console.error('❌ Database connection failed:', error.message);
-    console.log('💡 Check your MONGO_URL environment variable');
+    console.error('Database connection failed:', error.message);
   }
 };
 
@@ -126,7 +118,7 @@ db.on('error', (error) => {
   console.error('MongoDB connection error:', error);
 });
 db.on('disconnected', () => {
-  console.log('MongoDB disconnected - attempting to reconnect...');
+  console.log('MongoDB disconnected');
 });
 db.on('reconnected', () => {
   console.log('MongoDB reconnected');
@@ -134,7 +126,7 @@ db.on('reconnected', () => {
 
 // Request logging middleware
 app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path} - IP: ${req.ip} - Origin: ${req.headers.origin || 'No Origin'}`);
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
   next();
 });
 
@@ -166,43 +158,9 @@ app.get('/health', asyncHandler(async (req, res) => {
       timestamp: new Date().toISOString(),
       database: dbStatus,
       environment: process.env.NODE_ENV || 'development',
-      cors: 'enabled',
-      rateLimit: 'enabled',
       platform: 'Render'
     }
   });
-}));
-
-// Test Cloudinary connection - ADD THIS ENDPOINT
-app.get('/test-cloudinary', asyncHandler(async (req, res) => {
-  try {
-    console.log('🧪 Testing Cloudinary connection...');
-    const cloudinary = require('cloudinary').v2;
-    
-    // Test upload a small image
-    const result = await cloudinary.uploader.upload(
-      'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMSIgaGVpZ2h0PSIxIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjwvc3ZnPg==',
-      { folder: 'test' }
-    );
-    
-    console.log('✅ Cloudinary test successful:', result);
-    res.json({ 
-      success: true, 
-      message: 'Cloudinary connected and working',
-      result: {
-        public_id: result.public_id,
-        url: result.secure_url,
-        format: result.format
-      }
-    });
-  } catch (error) {
-    console.error('❌ Cloudinary test failed:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Cloudinary connection failed',
-      error: error.message 
-    });
-  }
 }));
 
 // Test route
@@ -213,8 +171,7 @@ app.get('/', asyncHandler(async (req, res) => {
     data: {
       version: '1.0.0',
       environment: process.env.NODE_ENV || 'development',
-      database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-      platform: 'Render'
+      database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
     }
   });
 }));
@@ -236,13 +193,7 @@ const initializeSuperAdmin = async () => {
         clearanceLevel: 'super_admin'
       });
       await superAdmin.save();
-      console.log('✅ Super admin user created');
-      console.log('🔐 Default credentials:');
-      console.log('   Username: superadmin');
-      console.log('   Password: admin123');
-      console.log('⚠️  CHANGE THESE CREDENTIALS IN PRODUCTION!');
-    } else {
-      console.log('✅ Admin user already exists');
+      console.log('Super admin user created');
     }
   } catch (error) {
     console.error('Error initializing super admin:', error);
@@ -250,7 +201,7 @@ const initializeSuperAdmin = async () => {
 };
 
 db.once('open', () => {
-  console.log('✅ Connected to Database');
+  console.log('Connected to Database');
   initializeSuperAdmin();
 });
 
@@ -270,8 +221,7 @@ app.use('*', (req, res) => {
       '/posters',
       '/users',
       '/orders',
-      '/health',
-      '/test-cloudinary'
+      '/health'
     ]
   });
 });
@@ -280,17 +230,13 @@ app.use('*', (req, res) => {
 app.use((error, req, res, next) => {
   console.error('Error:', error);
   
-  // CORS error
   if (error.message === 'Not allowed by CORS') {
     return res.status(403).json({
       success: false,
-      message: 'CORS policy: Origin not allowed',
-      yourOrigin: req.headers.origin,
-      allowedOrigins: allowedOrigins
+      message: 'CORS policy: Origin not allowed'
     });
   }
   
-  // Rate limit error
   if (error.statusCode === 429) {
     return res.status(429).json({
       success: false,
@@ -298,7 +244,6 @@ app.use((error, req, res, next) => {
     });
   }
   
-  // MongoDB duplicate key error
   if (error.code === 11000) {
     const field = Object.keys(error.keyValue)[0];
     return res.status(400).json({
@@ -307,7 +252,6 @@ app.use((error, req, res, next) => {
     });
   }
   
-  // MongoDB validation error
   if (error.name === 'ValidationError') {
     const errors = Object.values(error.errors).map(err => err.message);
     return res.status(400).json({
@@ -317,24 +261,19 @@ app.use((error, req, res, next) => {
     });
   }
   
-  // Default error
   res.status(error.status || 500).json({
     success: false,
-    message: error.message || 'Internal server error',
-    ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
+    message: error.message || 'Internal server error'
   });
 });
 
-// Render port binding - FIXED
+// Render port binding
 const PORT = process.env.PORT || 3000;
 
-// Only listen if not in Vercel environment
 if (!process.env.VERCEL) {
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`📊 Health check: http://localhost:${PORT}/health`);
-    console.log(`🔗 Render URL: https://yonasmarketplace-backend.onrender.com`);
+    console.log(`Server running on port ${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   });
 }
 

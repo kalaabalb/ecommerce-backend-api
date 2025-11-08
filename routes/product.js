@@ -41,11 +41,9 @@ router.get('/:id', asyncHandler(async (req, res) => {
     }
 }));
 
-// Create new product with Cloudinary - FIXED VERSION
+// Create new product with Cloudinary
 router.post('/', asyncHandler(async (req, res) => {
     try {
-        console.log('🔄 [PRODUCT] Starting product creation process...');
-        
         uploadProduct.fields([
             { name: 'image1', maxCount: 1 },
             { name: 'image2', maxCount: 1 },
@@ -53,9 +51,7 @@ router.post('/', asyncHandler(async (req, res) => {
             { name: 'image4', maxCount: 1 },
             { name: 'image5', maxCount: 1 }
         ])(req, res, async function (err) {
-            // FIXED: Proper error handling with status codes
             if (err instanceof multer.MulterError) {
-                console.error('❌ [PRODUCT] Multer Error:', err);
                 if (err.code === 'LIMIT_FILE_SIZE') {
                     return res.status(400).json({ 
                         success: false, 
@@ -67,23 +63,17 @@ router.post('/', asyncHandler(async (req, res) => {
                     message: `File upload error: ${err.message}` 
                 });
             } else if (err) {
-                console.error('❌ [PRODUCT] Upload Error:', err);
                 return res.status(500).json({ 
                     success: false, 
                     message: `Upload failed: ${err.message}` 
                 });
             }
 
-            console.log('✅ [PRODUCT] Files processed successfully');
-            console.log('📦 [PRODUCT] Request body:', req.body);
-            console.log('🖼️ [PRODUCT] Uploaded files:', req.files);
-
             try {
-                // Extract product data from the request body
-                const { 
-                    name, 
-                    description, 
-                    quantity, 
+                const {
+                    name,
+                    description,
+                    quantity,
                     price, 
                     offerPrice, 
                     proCategoryId, 
@@ -96,7 +86,6 @@ router.post('/', asyncHandler(async (req, res) => {
 
                 // Validate required fields
                 if (!name || !quantity || !price || !proCategoryId || !proSubCategoryId) {
-                    console.log('❌ [PRODUCT] Missing required fields');
                     return res.status(400).json({ 
                         success: false, 
                         message: "Name, quantity, price, category, and subcategory are required." 
@@ -111,23 +100,18 @@ router.post('/', asyncHandler(async (req, res) => {
                 fields.forEach((field, index) => {
                     if (req.files[field] && req.files[field].length > 0) {
                         const file = req.files[field][0];
-                        // Cloudinary provides the URL directly in file.path
                         const imageUrl = file.path;
-                        console.log(`🖼️ [PRODUCT] ${field} uploaded to: ${imageUrl}`);
                         imageUrls.push({ image: index + 1, url: imageUrl });
                     }
                 });
 
                 // Check if at least one image is provided
                 if (imageUrls.length === 0) {
-                    console.log('❌ [PRODUCT] No images provided');
                     return res.status(400).json({ 
                         success: false, 
                         message: "At least one product image is required." 
                     });
                 }
-
-                console.log('💾 [PRODUCT] Creating product in database...');
                 
                 // Create a new product object with data
                 const newProduct = new Product({ 
@@ -146,7 +130,6 @@ router.post('/', asyncHandler(async (req, res) => {
                 });
 
                 await newProduct.save();
-                console.log('✅ [PRODUCT] Product created successfully:', newProduct._id);
 
                 res.json({ 
                     success: true, 
@@ -155,7 +138,6 @@ router.post('/', asyncHandler(async (req, res) => {
                 });
 
             } catch (dbError) {
-                console.error('❌ [PRODUCT] Database Error:', dbError);
                 res.status(500).json({ 
                     success: false, 
                     message: `Database error: ${dbError.message}` 
@@ -164,7 +146,6 @@ router.post('/', asyncHandler(async (req, res) => {
         });
 
     } catch (outerError) {
-        console.error('❌ [PRODUCT] Outer Catch Error:', outerError);
         res.status(500).json({ 
             success: false, 
             message: `Server error: ${outerError.message}` 
@@ -172,12 +153,10 @@ router.post('/', asyncHandler(async (req, res) => {
     }
 }));
 
-// Update a product with Cloudinary - FIXED VERSION
+// Update a product with Cloudinary
 router.put('/:id', asyncHandler(async (req, res) => {
     const productId = req.params.id;
     try {
-        console.log('🔄 [PRODUCT] Starting product update for ID:', productId);
-        
         uploadProduct.fields([
             { name: 'image1', maxCount: 1 },
             { name: 'image2', maxCount: 1 },
@@ -185,9 +164,7 @@ router.put('/:id', asyncHandler(async (req, res) => {
             { name: 'image4', maxCount: 1 },
             { name: 'image5', maxCount: 1 }
         ])(req, res, async function (err) {
-            // FIXED: Proper error handling
             if (err instanceof multer.MulterError) {
-                console.error('❌ [PRODUCT] Multer Error:', err);
                 if (err.code === 'LIMIT_FILE_SIZE') {
                     return res.status(400).json({ 
                         success: false, 
@@ -199,7 +176,6 @@ router.put('/:id', asyncHandler(async (req, res) => {
                     message: `File upload error: ${err.message}` 
                 });
             } else if (err) {
-                console.error('❌ [PRODUCT] Upload Error:', err);
                 return res.status(500).json({ 
                     success: false, 
                     message: `Upload failed: ${err.message}` 
@@ -233,7 +209,6 @@ router.put('/:id', asyncHandler(async (req, res) => {
                     if (req.files[field] && req.files[field].length > 0) {
                         const file = req.files[field][0];
                         const imageUrl = file.path;
-                        console.log(`🖼️ [PRODUCT] Updating ${field} to: ${imageUrl}`);
                         
                         let imageEntry = productToUpdate.images.find(img => img.image === (index + 1));
                         if (imageEntry) {
@@ -245,7 +220,6 @@ router.put('/:id', asyncHandler(async (req, res) => {
                 });
 
                 await productToUpdate.save();
-                console.log('✅ [PRODUCT] Product updated successfully:', productId);
                 
                 res.json({ 
                     success: true, 
@@ -253,7 +227,6 @@ router.put('/:id', asyncHandler(async (req, res) => {
                     data: productToUpdate 
                 });
             } catch (dbError) {
-                console.error('❌ [PRODUCT] Database Error:', dbError);
                 res.status(500).json({ 
                     success: false, 
                     message: `Database error: ${dbError.message}` 
@@ -261,7 +234,6 @@ router.put('/:id', asyncHandler(async (req, res) => {
             }
         });
     } catch (error) {
-        console.error("❌ [PRODUCT] Outer Error:", error);
         res.status(500).json({ success: false, message: error.message });
     }
 }));
