@@ -1,3 +1,5 @@
+const mongoose = require('mongoose');
+
 const brandSchema = new mongoose.Schema({
     name: {
         type: String,
@@ -9,10 +11,11 @@ const brandSchema = new mongoose.Schema({
         ref: 'SubCategory',
         required: [true, 'Subcategory ID is required']
     },
-    // ADD THIS:
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'AdminUser',
         required: true
     }
 },{ timestamps: true });
+
+module.exports = mongoose.model('Brand', brandSchema);

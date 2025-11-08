@@ -1,3 +1,5 @@
+const mongoose = require('mongoose');
+
 const posterSchema = new mongoose.Schema({
   posterName: {
     type: String,
@@ -8,7 +10,6 @@ const posterSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  // ADD THIS:
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'AdminUser',
@@ -17,3 +18,5 @@ const posterSchema = new mongoose.Schema({
 }, {
   timestamps: true 
 });
+
+module.exports = mongoose.model('Poster', posterSchema);

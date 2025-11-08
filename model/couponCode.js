@@ -1,3 +1,5 @@
+const mongoose = require('mongoose');
+
 const couponSchema = new mongoose.Schema({
   couponCode: {
     type: String,
@@ -38,10 +40,11 @@ const couponSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Product'
   },
-  // ADD THIS:
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'AdminUser',
     required: true
   }
 }, { timestamps: true });
+
+module.exports = mongoose.model('Coupon', couponSchema);

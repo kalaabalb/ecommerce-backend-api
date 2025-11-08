@@ -1,0 +1,3490 @@
+const express = require('express');
+const cors = require('cors');
+const mongoose = require('mongoose');
+const asyncHandler = require('express-async-handler');
+const dotenv = require('dotenv');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+
+dotenv.config();
+
+const app = express();
+
+// Rate limiting for IPv6
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: process.env.NODE_ENV === 'production' ? 100 : 5000,
+  message: {
+    success: false,
+    message: 'Too many requests from this IP, please try again later.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req, res) => {
+    const forwarded = req.headers['x-forwarded-for'];
+    if (forwarded) {
+      const ips = forwarded.split(',');
+      return ips[0].trim();
+    }
+    return req.socket.remoteAddress;
+  }
+});
+
+app.use(limiter);
+
+// CORS configuration
+const allowedOrigins = process.env.NODE_ENV === 'production' 
+  ? [
+      'https://yonasmarketplace-backend.onrender.com',
+      'http://localhost:*',
+      '*' 
+    ]
+  : [
+      'http://localhost:*',
+      'http://10.161.175.199:*',
+      'http://192.168.*:*',
+      'http://127.0.0.1:*',
+      'http://0.0.0.0:*',
+      'http://10.0.2.2:*',
+      '*'
+    ];
+
+app.use(cors({ 
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+    
+    if (process.env.NODE_ENV !== 'production') {
+      return callback(null, true);
+    }
+    
+    if (allowedOrigins.some(pattern => {
+      if (pattern.includes('*')) {
+        const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
+        return regex.test(origin);
+      }
+      return pattern === origin;
+    })) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']
+}));
+
+// Handle preflight requests
+app.options('*', cors());
+
+// Security headers
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false
+}));
+
+// Body parsing middleware
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// MongoDB connection
+mongoose.set('strictQuery', true);
+
+const connectDB = async () => {
+  try {
+    const mongoUrl = process.env.MONGO_URL;
+    
+    if (!mongoUrl) {
+      console.error('MONGO_URL environment variable is missing');
+      return;
+    }
+    
+    await mongoose.connect(mongoUrl, {
+      serverSelectionTimeoutMS: 30000,
+      socketTimeoutMS: 45000,
+      maxPoolSize: 10,
+    });
+    console.log('Connected to MongoDB Atlas');
+  } catch (error) {
+    console.error('Database connection failed:', error.message);
+  }
+};
+
+connectDB();
+
+const db = mongoose.connection;
+db.on('error', (error) => {
+  console.error('MongoDB connection error:', error);
+});
+db.on('disconnected', () => {
+  console.log('MongoDB disconnected');
+});
+db.on('reconnected', () => {
+  console.log('MongoDB reconnected');
+});
+
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  next();
+});
+
+// Routes
+app.use('/categories', require('./routes/category'));
+app.use('/subCategories', require('./routes/subCategory'));
+app.use('/brands', require('./routes/brand'));
+app.use('/variantTypes', require('./routes/variantType'));
+app.use('/variants', require('./routes/variant'));
+app.use('/products', require('./routes/product'));
+app.use('/couponCodes', require('./routes/couponCode'));
+app.use('/posters', require('./routes/poster'));
+app.use('/users', require('./routes/user'));
+app.use('/orders', require('./routes/order'));
+app.use('/payment', require('./routes/payment'));
+app.use('/notification', require('./routes/notification'));
+app.use('/verification', require('./routes/verification'));
+app.use('/ratings', require('./routes/rating'));
+app.use('/admin-users', require('./routes/adminUser'));
+
+// Health check route
+app.get('/health', asyncHandler(async (req, res) => {
+  const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
+  
+  res.json({ 
+    success: true, 
+    message: 'API is healthy', 
+    data: {
+      timestamp: new Date().toISOString(),
+      database: dbStatus,
+      environment: process.env.NODE_ENV || 'development',
+      platform: 'Render'
+    }
+  });
+}));
+
+// Test route
+app.get('/', asyncHandler(async (req, res) => {
+  res.json({ 
+    success: true, 
+    message: 'API working successfully on Render', 
+    data: {
+      version: '1.0.0',
+      environment: process.env.NODE_ENV || 'development',
+      database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+    }
+  });
+}));
+
+// Initialize super admin
+const initializeSuperAdmin = async () => {
+  try {
+    const AdminUser = require('./model/adminUser');
+    const superAdminExists = await AdminUser.findOne({ 
+      clearanceLevel: 'super_admin'
+    });
+    
+    if (!superAdminExists) {
+      const superAdmin = new AdminUser({
+        username: 'superadmin',
+        password: 'admin123',
+        name: 'Super Administrator',
+        email: 'superadmin@yourapp.com',
+        clearanceLevel: 'super_admin'
+      });
+      await superAdmin.save();
+      console.log('Super admin user created');
+    }
+  } catch (error) {
+    console.error('Error initializing super admin:', error);
+  }
+};
+
+db.once('open', () => {
+  console.log('Connected to Database');
+  initializeSuperAdmin();
+});
+
+// 404 handler
+app.use('*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    message: `Route ${req.originalUrl} not found`,
+    availableRoutes: [
+      '/categories',
+      '/subCategories', 
+      '/brands',
+      '/variantTypes',
+      '/variants',
+      '/products',
+      '/couponCodes',
+      '/posters',
+      '/users',
+      '/orders',
+      '/health'
+    ]
+  });
+});
+
+// Global error handler
+app.use((error, req, res, next) => {
+  console.error('Error:', error);
+  
+  if (error.message === 'Not allowed by CORS') {
+    return res.status(403).json({
+      success: false,
+      message: 'CORS policy: Origin not allowed'
+    });
+  }
+  
+  if (error.statusCode === 429) {
+    return res.status(429).json({
+      success: false,
+      message: 'Too many requests, please try again later.'
+    });
+  }
+  
+  if (error.code === 11000) {
+    const field = Object.keys(error.keyValue)[0];
+    return res.status(400).json({
+      success: false,
+      message: `${field} already exists`
+    });
+  }
+  
+  if (error.name === 'ValidationError') {
+    const errors = Object.values(error.errors).map(err => err.message);
+    return res.status(400).json({
+      success: false,
+      message: 'Validation failed',
+      errors: errors
+    });
+  }
+  
+  res.status(error.status || 500).json({
+    success: false,
+    message: error.message || 'Internal server error'
+  });
+});
+
+// Render port binding
+const PORT = process.env.PORT || 3000;
+
+if (!process.env.VERCEL) {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on port ${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  });
+}
+
+module.exports = app;{
+  "name": "online-store",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "production": "NODE_ENV=production node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.12.2",
+    "bcryptjs": "^3.0.3",
+    "body-parser": "^1.20.2",
+    "cloudinary": "^1.41.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.19.2",
+    "express-async-handler": "^1.2.0",
+    "express-rate-limit": "^8.2.1",
+    "helmet": "^8.1.0",
+    "mongoose": "^8.3.2",
+    "multer": "^2.0.2",
+    "multer-storage-cloudinary": "^4.0.0",
+    "nodemailer": "^6.10.1",
+    "stripe": "^15.6.0",
+    "uuid": "^9.0.1"
+  }
+}
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
+
+const adminUserSchema = new mongoose.Schema({
+  username: {
+    type: String,
+    required: [true, 'Username is required'],
+    unique: true,
+    trim: true
+  },
+  name: {
+    type: String,
+    required: [true, 'Name is required'],
+    trim: true
+  },
+  email: {
+    type: String,
+    required: [true, 'Email is required'],
+    unique: true,
+    trim: true,
+    lowercase: true
+  },
+  password: {
+    type: String,
+    required: [true, 'Password is required'],
+    minlength: 6
+  },
+  clearanceLevel: {
+    type: String,
+    enum: ['super_admin', 'admin'],
+    default: 'admin'
+  },
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'AdminUser'
+  },
+  isActive: {
+    type: Boolean,
+    default: true
+  }
+}, { 
+  timestamps: true 
+});
+
+// Hash password before saving
+adminUserSchema.pre('save', async function(next) {
+  if (!this.isModified('password')) return next();
+  this.password = await bcrypt.hash(this.password, 12);
+  next();
+});
+
+// Compare password method
+adminUserSchema.methods.correctPassword = async function(candidatePassword) {
+  return await bcrypt.compare(candidatePassword, this.password);
+};
+
+// Index for better query performance
+adminUserSchema.index({ username: 1 });
+adminUserSchema.index({ email: 1 });
+adminUserSchema.index({ clearanceLevel: 1 });
+
+const AdminUser = mongoose.model('AdminUser', adminUserSchema);
+
+module.exports = AdminUser;const brandSchema = new mongoose.Schema({
+    name: {
+        type: String,
+        required: [true, 'Name is required'],
+        trim: true
+    },
+    subcategoryId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'SubCategory',
+        required: [true, 'Subcategory ID is required']
+    },
+    // ADD THIS:
+    createdBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'AdminUser',
+        required: true
+    }
+},{ timestamps: true });const mongoose = require('mongoose');
+
+const categorySchema = new mongoose.Schema({
+    name: { 
+        type: String, 
+        required: true 
+    },
+    image: { 
+        type: String, 
+        required: true 
+    },
+    // Add createdBy field
+    createdBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'AdminUser',
+        required: true
+    }
+}, { timestamps: true });
+
+module.exports = mongoose.model('Category', categorySchema);const couponSchema = new mongoose.Schema({
+  couponCode: {
+    type: String,
+    required: true,
+    unique: true
+  },
+  discountType: {
+    type: String,
+    enum: ['fixed', 'percentage'],
+    required: true
+  },
+  discountAmount: {
+    type: Number,
+    required: true
+  },
+  minimumPurchaseAmount: {
+    type: Number,
+    required: true
+  },
+  endDate: {
+    type: Date,
+    required: true
+  },
+  status: {
+    type: String,
+    enum: ['active', 'inactive'],
+    default: 'active'
+  },
+  applicableCategory: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Category'
+  },
+  applicableSubCategory: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'SubCategory'
+  },
+  applicableProduct: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Product'
+  },
+  // ADD THIS:
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'AdminUser',
+    required: true
+  }
+}, { timestamps: true });const mongoose = require('mongoose');
+
+// Define the Notification schema
+const notificationSchema = new mongoose.Schema({
+    notificationId: {
+        type: String,
+        required: [true, 'Notification ID is required'],
+        unique: true
+    },
+    title: {
+        type: String,
+        required: [true, 'Title is required'],
+        trim: true
+    },
+    description: {
+        type: String,
+        required: [true, 'Description is required'],
+        trim: true
+    },
+    imageUrl: {
+        type: String,
+        trim: true
+    },
+}, { timestamps: true });
+
+// Create the Notification model
+const Notification = mongoose.model('Notification', notificationSchema);
+
+module.exports = Notification;
+const mongoose = require('mongoose');
+
+const orderSchema = new mongoose.Schema({
+  userID: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
+  orderDate: {
+    type: Date,
+    default: Date.now
+  },
+  orderStatus: {
+    type: String,
+    enum: ['pending', 'processing', 'shipped', 'delivered', 'cancelled', 'payment_pending', 'payment_verified'],
+    default: 'pending'
+  },
+  items: [
+    {
+      productID: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Product',
+        required: true
+      },
+      productName: {
+        type: String,
+        required: true
+      },
+      quantity: {
+        type: Number,
+        required: true
+      },
+      price: {
+        type: Number,
+        required: true
+      },
+      variant: {
+        type: String,
+      },
+      // SIMPLE OWNER TRACKING - just to know which admin owns this product
+      productOwner: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'AdminUser'
+      }
+    }
+  ],
+  totalPrice: {
+    type: Number,
+    required: true
+  },
+  shippingAddress: {
+    phone: String,
+    street: String,
+    city: String,
+    state: String,
+    postalCode: String,
+    country: String
+  },
+  paymentMethod: {
+    type: String,
+    enum: ['cod', 'cbe', 'telebirr'],
+    required: true
+  },
+  paymentStatus: {
+    type: String,
+    enum: ['pending', 'verified', 'failed'],
+    default: 'pending'
+  },
+  paymentProof: {
+    imageUrl: String,
+    uploadedAt: Date,
+    verified: Boolean,
+    verifiedAt: Date
+  },
+  couponCode: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Coupon'
+  },
+  orderTotal: {
+    subtotal: Number,
+    discount: Number,
+    total: Number
+  },
+  trackingUrl: {
+    type: String
+  }
+}, {
+  timestamps: true
+});
+
+const Order = mongoose.model('Order', orderSchema);
+
+module.exports = Order;const posterSchema = new mongoose.Schema({
+  posterName: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  imageUrl: {
+    type: String,
+    required: true
+  },
+  // ADD THIS:
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'AdminUser',
+    required: true
+  }
+}, {
+  timestamps: true 
+});const mongoose = require('mongoose');
+
+const productSchema = new mongoose.Schema({
+    name: {
+        type: String,
+        required: [true, 'Name is required'],
+        trim: true
+    },
+    description: {
+        type: String,
+        trim: true
+    },
+    quantity: {
+        type: Number,
+        required: true
+    },
+    price: {
+        type: Number,
+        required: true
+    },
+    offerPrice: {
+        type: Number
+    },
+    proCategoryId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Category',
+        required: true
+    },
+    proSubCategoryId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'SubCategory',
+        required: true
+    },
+    proBrandId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Brand'
+    },
+    proVariantTypeId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'VariantType'
+    },
+    proVariantId: [String],
+    images: [{
+        image: {
+            type: Number,
+            required: true
+        },
+        url: {
+            type: String,
+            required: true
+        }
+    }],
+    // MADE REQUIRED - track who created this product
+    createdBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'AdminUser',
+        required: true // Changed to required
+    }
+}, { timestamps: true });
+
+const Product = mongoose.model('Product', productSchema);
+module.exports = Product;const mongoose = require('mongoose');
+
+const ratingSchema = new mongoose.Schema({
+  productId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Product',
+    required: true
+  },
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
+  userName: {
+    type: String,
+    required: true
+  },
+  rating: {
+    type: Number,
+    required: true,
+    min: 1,
+    max: 5
+  },
+  review: {
+    type: String,
+    default: ''
+  },
+  verifiedPurchase: {
+    type: Boolean,
+    default: false
+  }
+}, {
+  timestamps: true
+});
+
+// Create compound index to ensure one rating per user per product
+ratingSchema.index({ productId: 1, userId: 1 }, { unique: true });
+
+module.exports = mongoose.model('Rating', ratingSchema);
+const subCategorySchema = new mongoose.Schema({
+    name: {
+        type: String,
+        required: [true, 'Name is required'],
+        trim: true
+    },
+    categoryId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Category',
+        required: [true, 'Category ID is required']
+    },
+    // ADD THIS:
+    createdBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'AdminUser',
+        required: true
+    }
+},{ timestamps: true });const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
+
+const userSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: true
+  },
+  email: {
+    type: String,
+    unique: true,
+    sparse: true
+  },
+  phone: {
+    type: String,
+    unique: true,
+    sparse: true
+  },
+  password: {
+    type: String,
+    required: true
+  },
+  emailVerified: {
+    type: Boolean,
+    default: false
+  },
+  phoneVerified: {
+    type: Boolean,
+    default: false
+  },
+  verificationCode: {
+    type: String
+  },
+  codeExpires: {
+    type: Date
+  },
+  recoveryEmail: {
+    type: String
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  },
+  updatedAt: {
+    type: Date,
+    default: Date.now
+  }
+});
+
+// Hash password before saving
+userSchema.pre('save', async function(next) {
+  if (!this.isModified('password')) return next();
+  this.password = await bcrypt.hash(this.password, 12);
+  next();
+});
+
+// Compare password method
+userSchema.methods.correctPassword = async function(candidatePassword) {
+  return await bcrypt.compare(candidatePassword, this.password);
+};
+
+userSchema.pre('save', function(next) {
+  this.updatedAt = Date.now();
+  next();
+});
+
+const User = mongoose.model('User', userSchema);
+module.exports = User;const variantSchema = new mongoose.Schema({
+    name: {
+        type: String,
+        required: true
+    },
+    variantTypeId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'VariantType',
+        required: true
+    },
+    // ADD THIS:
+    createdBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'AdminUser',
+        required: true
+    }
+},{ timestamps: true });const variantTypeSchema = new mongoose.Schema({
+    name: {
+        type: String,
+        required: [true, 'Name is required'], 
+        trim: true
+    },
+    type: {
+        type: String,
+        required: [true, 'Type is required'],
+        trim: true
+    },
+    // ADD THIS:
+    createdBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'AdminUser',
+        required: true
+    }
+},{ timestamps: true });const express = require('express');
+const asyncHandler = require('express-async-handler');
+const router = express.Router();
+const AdminUser = require('../model/adminUser');
+const Product = require('../model/product');
+const Category = require('../model/category');
+const SubCategory = require('../model/subCategory');
+const Brand = require('../model/brand');
+const VariantType = require('../model/variantType');
+const Variant = require('../model/variant');
+const Coupon = require('../model/couponCode');
+const Poster = require('../model/poster');
+const { verifyAdmin } = require('../middleware/auth');
+
+// Admin login
+router.post('/login', asyncHandler(async (req, res) => {
+  const { username, password } = req.body;
+
+  if (!username || !password) {
+    return res.status(400).json({ success: false, message: "Username and password are required." });
+  }
+
+  try {
+    const adminUser = await AdminUser.findOne({ username, isActive: true });
+
+    if (!adminUser) {
+      return res.status(401).json({ success: false, message: "Invalid username or password." });
+    }
+
+    // SECURE password comparison with bcrypt
+    if (!(await adminUser.correctPassword(password))) {
+      return res.status(401).json({ success: false, message: "Invalid username or password." });
+    }
+
+    // Return user data (excluding password)
+    const userResponse = {
+      _id: adminUser._id,
+      username: adminUser.username,
+      name: adminUser.name,
+      email: adminUser.email,
+      clearanceLevel: adminUser.clearanceLevel,
+      createdBy: adminUser.createdBy,
+      createdAt: adminUser.createdAt,
+      updatedAt: adminUser.updatedAt
+    };
+
+    res.json({ success: true, message: "Login successful.", data: userResponse });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+}));
+
+// Get all admin users (super admin only)
+router.get('/', verifyAdmin, asyncHandler(async (req, res) => {
+  try {
+    // Only super admin can see all admin users
+    if (req.admin.clearanceLevel !== 'super_admin') {
+      return res.status(403).json({ success: false, message: "Super admin privileges required." });
+    }
+
+    const adminUsers = await AdminUser.find({ isActive: true })
+      .select('-password')
+      .populate('createdBy', 'name username')
+      .sort({ createdAt: -1 });
+
+    res.json({ success: true, message: "Admin users retrieved successfully.", data: adminUsers });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+}));
+
+// Get admin user by ID
+router.get('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+  try {
+    const adminUser = await AdminUser.findById(req.params.id)
+      .select('-password')
+      .populate('createdBy', 'name username');
+
+    if (!adminUser) {
+      return res.status(404).json({ success: false, message: "Admin user not found." });
+    }
+
+    res.json({ success: true, message: "Admin user retrieved successfully.", data: adminUser });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+}));
+
+// Create new admin user (super admin only)
+router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
+  // Only super admin can create new admin users
+  if (req.admin.clearanceLevel !== 'super_admin') {
+    return res.status(403).json({ success: false, message: "Super admin privileges required." });
+  }
+
+  const { username, name, email, password, clearanceLevel } = req.body;
+
+  if (!username || !name || !email || !password) {
+    return res.status(400).json({ success: false, message: "Username, name, email, and password are required." });
+  }
+
+  if (password.length < 6) {
+    return res.status(400).json({ success: false, message: "Password must be at least 6 characters long." });
+  }
+
+  try {
+    // Check if username or email already exists
+    const existingUser = await AdminUser.findOne({
+      $or: [{ username }, { email }]
+    });
+
+    if (existingUser) {
+      return res.status(400).json({ success: false, message: "Username or email already exists." });
+    }
+
+    const adminUser = new AdminUser({
+      username,
+      name,
+      email,
+      password, // Will be automatically hashed by the model pre-save hook
+      clearanceLevel: clearanceLevel || 'admin',
+      createdBy: req.admin._id
+    });
+
+    await adminUser.save();
+
+    // Return user without password
+    const userResponse = {
+      _id: adminUser._id,
+      username: adminUser.username,
+      name: adminUser.name,
+      email: adminUser.email,
+      clearanceLevel: adminUser.clearanceLevel,
+      createdBy: adminUser.createdBy,
+      createdAt: adminUser.createdAt,
+      updatedAt: adminUser.updatedAt
+    };
+
+    res.json({ success: true, message: "Admin user created successfully.", data: userResponse });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({ success: false, message: "Username or email already exists." });
+    }
+    res.status(500).json({ success: false, message: error.message });
+  }
+}));
+
+// Update admin user
+router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+  const { name, email, clearanceLevel, isActive, password } = req.body;
+
+  try {
+    // Only super admin can update other admin users
+    if (req.admin.clearanceLevel !== 'super_admin' && req.params.id !== req.admin._id.toString()) {
+      return res.status(403).json({ success: false, message: "You can only update your own profile." });
+    }
+
+    const updateData = {};
+    if (name) updateData.name = name;
+    if (email) updateData.email = email;
+    if (password) updateData.password = password; // Will be hashed automatically
+    if (clearanceLevel && req.admin.clearanceLevel === 'super_admin') {
+      updateData.clearanceLevel = clearanceLevel;
+    }
+    if (typeof isActive === 'boolean' && req.admin.clearanceLevel === 'super_admin') {
+      updateData.isActive = isActive;
+    }
+
+    const adminUser = await AdminUser.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true, runValidators: true }
+    ).select('-password');
+
+    if (!adminUser) {
+      return res.status(404).json({ success: false, message: "Admin user not found." });
+    }
+
+    res.json({ success: true, message: "Admin user updated successfully.", data: adminUser });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({ success: false, message: "Email already exists." });
+    }
+    res.status(500).json({ success: false, message: error.message });
+  }
+}));
+
+// Delete admin user and all their data (super admin only)
+router.delete('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+  try {
+    // Only super admin can delete admin users
+    if (req.admin.clearanceLevel !== 'super_admin') {
+      return res.status(403).json({ success: false, message: "Super admin privileges required." });
+    }
+
+    const adminUser = await AdminUser.findById(req.params.id);
+
+    if (!adminUser) {
+      return res.status(404).json({ success: false, message: "Admin user not found." });
+    }
+
+    const userId = adminUser._id;
+
+    // Delete all data created by this user
+    await Promise.all([
+      Product.deleteMany({ createdBy: userId }),
+      Category.deleteMany({ createdBy: userId }),
+      SubCategory.deleteMany({ createdBy: userId }),
+      Brand.deleteMany({ createdBy: userId }),
+      VariantType.deleteMany({ createdBy: userId }),
+      Variant.deleteMany({ createdBy: userId }),
+      Coupon.deleteMany({ createdBy: userId }),
+      Poster.deleteMany({ createdBy: userId })
+    ]);
+
+    // Delete the admin user
+    await AdminUser.findByIdAndDelete(userId);
+
+    res.json({ success: true, message: "Admin user and all associated data deleted successfully." });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+}));
+
+// Deactivate admin user (soft delete) - super admin only
+router.put('/:id/deactivate', verifyAdmin, asyncHandler(async (req, res) => {
+  try {
+    // Only super admin can deactivate admin users
+    if (req.admin.clearanceLevel !== 'super_admin') {
+      return res.status(403).json({ success: false, message: "Super admin privileges required." });
+    }
+
+    const adminUser = await AdminUser.findByIdAndUpdate(
+      req.params.id,
+      { isActive: false },
+      { new: true }
+    ).select('-password');
+
+    if (!adminUser) {
+      return res.status(404).json({ success: false, message: "Admin user not found." });
+    }
+
+    res.json({ success: true, message: "Admin user deactivated successfully.", data: adminUser });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+}));
+
+module.exports = router;const express = require('express');
+const router = express.Router();
+const Brand = require('../model/brand');
+const Product = require('../model/product');
+const asyncHandler = require('express-async-handler');
+const { verifyAdmin } = require('../middleware/auth');
+
+// Get all brands - FILTER BY ADMIN
+router.get('/', asyncHandler(async (req, res) => {
+    try {
+        const { adminId } = req.query;
+        
+        let filter = {};
+        if (adminId) {
+            filter.createdBy = adminId;
+        }
+
+        const brands = await Brand.find(filter)
+            .populate('subcategoryId')
+            .populate('createdBy', 'username name')
+            .sort({ _id: -1 });
+        
+        res.json({ success: true, message: "Brands retrieved successfully.", data: brands });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Get a brand by ID
+router.get('/:id', asyncHandler(async (req, res) => {
+    try {
+        const brandID = req.params.id;
+        const brand = await Brand.findById(brandID)
+            .populate('subcategoryId')
+            .populate('createdBy', 'username name');
+        
+        if (!brand) {
+            return res.status(404).json({ success: false, message: "Brand not found." });
+        }
+        res.json({ success: true, message: "Brand retrieved successfully.", data: brand });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Create a new brand - SIMPLE ADMIN CHECK
+router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
+    const { name, subcategoryId, adminId } = req.body;
+    
+    if (!name || !subcategoryId) {
+        return res.status(400).json({ success: false, message: "Name and subcategory ID are required." });
+    }
+
+    try {
+        const brand = new Brand({ name, subcategoryId, createdBy: adminId });
+        const newBrand = await brand.save();
+        res.json({ success: true, message: "Brand created successfully.", data: newBrand });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Update a brand - SIMPLE OWNERSHIP CHECK
+router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+    const brandID = req.params.id;
+    const { name, subcategoryId, adminId } = req.body;
+    
+    if (!name || !subcategoryId) {
+        return res.status(400).json({ success: false, message: "Name and subcategory ID are required." });
+    }
+
+    try {
+        // Find brand and check ownership
+        const brand = await Brand.findById(brandID);
+        if (!brand) {
+            return res.status(404).json({ success: false, message: "Brand not found." });
+        }
+
+        // Super admin can edit anything, regular admins only their own
+        if (req.admin.clearanceLevel !== 'super_admin' && brand.createdBy.toString() !== adminId) {
+            return res.status(403).json({ success: false, message: "You can only edit your own brands." });
+        }
+
+        const updatedBrand = await Brand.findByIdAndUpdate(
+            brandID, 
+            { name, subcategoryId }, 
+            { new: true }
+        );
+        
+        res.json({ success: true, message: "Brand updated successfully.", data: updatedBrand });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Delete a brand - SIMPLE OWNERSHIP CHECK
+router.delete('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+    const brandID = req.params.id;
+    const { adminId } = req.body;
+    
+    try {
+        // Find brand and check ownership
+        const brand = await Brand.findById(brandID);
+        if (!brand) {
+            return res.status(404).json({ success: false, message: "Brand not found." });
+        }
+
+        // Super admin can delete anything, regular admins only their own
+        if (req.admin.clearanceLevel !== 'super_admin' && brand.createdBy.toString() !== adminId) {
+            return res.status(403).json({ success: false, message: "You can only delete your own brands." });
+        }
+
+        // Check if any products reference this brand
+        const products = await Product.find({ proBrandId: brandID });
+        if (products.length > 0) {
+            return res.status(400).json({ success: false, message: "Cannot delete brand. Products are referencing it." });
+        }
+
+        await Brand.findByIdAndDelete(brandID);
+        res.json({ success: true, message: "Brand deleted successfully." });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+module.exports = router;const express = require('express');
+const router = express.Router();
+const Category = require('../model/category');
+const SubCategory = require('../model/subCategory');
+const Product = require('../model/product');
+const { uploadCategory } = require('../uploadFile');
+const multer = require('multer');
+const asyncHandler = require('express-async-handler');
+const { verifyAdmin } = require('../middleware/auth');
+
+// Get all categories - FILTER BY ADMIN
+router.get('/', asyncHandler(async (req, res) => {
+    try {
+        const { adminId } = req.query;
+        
+        let filter = {};
+        if (adminId) {
+            filter.createdBy = adminId;
+        }
+
+        const categories = await Category.find(filter)
+            .populate('createdBy', 'username name')
+            .sort({ _id: -1 });
+        res.json({ success: true, message: "Categories retrieved successfully.", data: categories });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Get a category by ID
+router.get('/:id', asyncHandler(async (req, res) => {
+    try {
+        const categoryID = req.params.id;
+        const category = await Category.findById(categoryID)
+            .populate('createdBy', 'username name');
+        
+        if (!category) {
+            return res.status(404).json({ success: false, message: "Category not found." });
+        }
+        
+        res.json({ success: true, message: "Category retrieved successfully.", data: category });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Create a new category - SIMPLE ADMIN CHECK
+router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        uploadCategory.single('img')(req, res, async function (err) {
+            if (err instanceof multer.MulterError) {
+                return res.json({ success: false, message: err.message });
+            } else if (err) {
+                return res.json({ success: false, message: err.message });
+            }
+            
+            const { name, adminId } = req.body;
+            let imageUrl = '';
+
+            if (req.file) {
+                imageUrl = req.file.path;
+            }
+
+            if (!name) {
+                return res.status(400).json({ success: false, message: "Name is required." });
+            }
+
+            if (!imageUrl) {
+                return res.status(400).json({ success: false, message: "Image is required." });
+            }
+
+            try {
+                const newCategory = new Category({
+                    name: name,
+                    image: imageUrl,
+                    createdBy: adminId
+                });
+                
+                await newCategory.save();
+                res.json({ success: true, message: "Category created successfully.", data: newCategory });
+            } catch (error) {
+                res.status(500).json({ success: false, message: error.message });
+            }
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+}));
+
+// Update a category - SIMPLE OWNERSHIP CHECK
+router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const categoryID = req.params.id;
+        uploadCategory.single('img')(req, res, async function (err) {
+            if (err instanceof multer.MulterError) {
+                return res.json({ success: false, message: err.message });
+            } else if (err) {
+                return res.json({ success: false, message: err.message });
+            }
+
+            const { name, adminId } = req.body;
+            let image = req.body.image;
+
+            if (req.file) {
+                image = req.file.path;
+            }
+
+            if (!name || !image) {
+                return res.status(400).json({ success: false, message: "Name and image are required." });
+            }
+
+            try {
+                // Find category and check ownership
+                const category = await Category.findById(categoryID);
+                if (!category) {
+                    return res.status(404).json({ success: false, message: "Category not found." });
+                }
+
+                // Super admin can edit anything, regular admins only their own
+                if (req.admin.clearanceLevel !== 'super_admin' && category.createdBy.toString() !== adminId) {
+                    return res.status(403).json({ success: false, message: "You can only edit your own categories." });
+                }
+
+                const updatedCategory = await Category.findByIdAndUpdate(
+                    categoryID, 
+                    { name: name, image: image }, 
+                    { new: true }
+                );
+                
+                res.json({ success: true, message: "Category updated successfully.", data: updatedCategory });
+            } catch (error) {
+                res.status(500).json({ success: false, message: error.message });
+            }
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+}));
+
+// Delete a category - SIMPLE OWNERSHIP CHECK
+router.delete('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const categoryID = req.params.id;
+        const { adminId } = req.body;
+
+        // Find category and check ownership
+        const category = await Category.findById(categoryID);
+        if (!category) {
+            return res.status(404).json({ success: false, message: "Category not found." });
+        }
+
+        // Super admin can delete anything, regular admins only their own
+        if (req.admin.clearanceLevel !== 'super_admin' && category.createdBy.toString() !== adminId) {
+            return res.status(403).json({ success: false, message: "You can only delete your own categories." });
+        }
+
+        // Check if any subcategories reference this category
+        const subcategories = await SubCategory.find({ categoryId: categoryID });
+        if (subcategories.length > 0) {
+            return res.status(400).json({ success: false, message: "Cannot delete category. Subcategories are referencing it." });
+        }
+
+        // Check if any products reference this category
+        const products = await Product.find({ proCategoryId: categoryID });
+        if (products.length > 0) {
+            return res.status(400).json({ success: false, message: "Cannot delete category. Products are referencing it." });
+        }
+
+        await Category.findByIdAndDelete(categoryID);
+        res.json({ success: true, message: "Category deleted successfully." });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+module.exports = router;const express = require('express');
+const asyncHandler = require('express-async-handler');
+const router = express.Router();
+const Coupon = require('../model/couponCode'); 
+const Product = require('../model/product');
+const { verifyAdmin } = require('../middleware/auth');
+
+// Get all coupons - FILTER BY ADMIN
+router.get('/', asyncHandler(async (req, res) => {
+    try {
+        const { adminId } = req.query;
+        
+        let filter = {};
+        if (adminId) {
+            filter.createdBy = adminId;
+        }
+
+        const coupons = await Coupon.find(filter)
+            .populate('applicableCategory', 'id name')
+            .populate('applicableSubCategory', 'id name')
+            .populate('applicableProduct', 'id name')
+            .populate('createdBy', 'username name')
+            .sort({ _id: -1 });
+        
+        res.json({ success: true, message: "Coupons retrieved successfully.", data: coupons });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Get a coupon by ID
+router.get('/:id', asyncHandler(async (req, res) => {
+    try {
+        const couponID = req.params.id;
+        const coupon = await Coupon.findById(couponID)
+            .populate('applicableCategory', 'id name')
+            .populate('applicableSubCategory', 'id name')
+            .populate('applicableProduct', 'id name')
+            .populate('createdBy', 'username name');
+            
+        if (!coupon) {
+            return res.status(404).json({ success: false, message: "Coupon not found." });
+        }
+        res.json({ success: true, message: "Coupon retrieved successfully.", data: coupon });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Create a new coupon - SIMPLE ADMIN CHECK
+router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
+    const { couponCode, discountType, discountAmount, minimumPurchaseAmount, endDate, status, applicableCategory, applicableSubCategory, applicableProduct, adminId } = req.body;
+    
+    if (!couponCode || !discountType || !discountAmount || !endDate || !status) {
+        return res.status(400).json({ success: false, message: "Code, discountType, discountAmount, endDate, and status are required." });
+    }
+
+    try {
+        const coupon = new Coupon({
+            couponCode,
+            discountType,
+            discountAmount,
+            minimumPurchaseAmount,
+            endDate,
+            status,
+            applicableCategory,
+            applicableSubCategory,
+            applicableProduct,
+            createdBy: adminId
+        });
+
+        const newCoupon = await coupon.save();
+        res.json({ success: true, message: "Coupon created successfully.", data: newCoupon });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Update a coupon - SIMPLE OWNERSHIP CHECK
+router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const couponID = req.params.id;
+        const { couponCode, discountType, discountAmount, minimumPurchaseAmount, endDate, status, applicableCategory, applicableSubCategory, applicableProduct, adminId } = req.body;
+        
+        if (!couponCode || !discountType || !discountAmount || !endDate || !status) {
+            return res.status(400).json({ success: false, message: "CouponCode, discountType, discountAmount, endDate, and status are required." });
+        }
+
+        // Find coupon and check ownership
+        const coupon = await Coupon.findById(couponID);
+        if (!coupon) {
+            return res.status(404).json({ success: false, message: "Coupon not found." });
+        }
+
+        // Super admin can edit anything, regular admins only their own
+        if (req.admin.clearanceLevel !== 'super_admin' && coupon.createdBy.toString() !== adminId) {
+            return res.status(403).json({ success: false, message: "You can only edit your own coupons." });
+        }
+
+        const updatedCoupon = await Coupon.findByIdAndUpdate(
+            couponID,
+            { couponCode, discountType, discountAmount, minimumPurchaseAmount, endDate, status, applicableCategory, applicableSubCategory, applicableProduct },
+            { new: true }
+        );
+
+        res.json({ success: true, message: "Coupon updated successfully.", data: updatedCoupon });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Delete a coupon - SIMPLE OWNERSHIP CHECK
+router.delete('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const couponID = req.params.id;
+        const { adminId } = req.body;
+        
+        // Find coupon and check ownership
+        const coupon = await Coupon.findById(couponID);
+        if (!coupon) {
+            return res.status(404).json({ success: false, message: "Coupon not found." });
+        }
+
+        // Super admin can delete anything, regular admins only their own
+        if (req.admin.clearanceLevel !== 'super_admin' && coupon.createdBy.toString() !== adminId) {
+            return res.status(403).json({ success: false, message: "You can only delete your own coupons." });
+        }
+
+        await Coupon.findByIdAndDelete(couponID);
+        res.json({ success: true, message: "Coupon deleted successfully." });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// KEEP THIS ROUTE AS IS - NO CHANGES NEEDED (it's for customers)
+router.post('/check-coupon', asyncHandler(async (req, res) => {
+    console.log(req.body);
+    const { couponCode, productIds, purchaseAmount } = req.body;
+
+    try {
+        const coupon = await Coupon.findOne({ couponCode });
+
+        if (!coupon) {
+            return res.json({ success: false, message: "Coupon not found." });
+        }
+
+        const currentDate = new Date();
+        if (coupon.endDate < currentDate) {
+            return res.json({ success: false, message: "Coupon is expired." });
+        }
+
+        if (coupon.status !== 'active') {
+            return res.json({ success: false, message: "Coupon is inactive." });
+        }
+
+        if (coupon.minimumPurchaseAmount && purchaseAmount < coupon.minimumPurchaseAmount) {
+            return res.json({ success: false, message: "Minimum purchase amount not met." });
+        }
+
+        if (!coupon.applicableCategory && !coupon.applicableSubCategory && !coupon.applicableProduct) {
+            return res.json({ success: true, message: "Coupon is applicable for all orders.", data: coupon });
+        }
+
+        const products = await Product.find({ _id: { $in: productIds } });
+
+        const isValid = products.every(product => {
+            if (coupon.applicableCategory && coupon.applicableCategory.toString() !== product.proCategoryId.toString()) {
+                return false;
+            }
+            if (coupon.applicableSubCategory && coupon.applicableSubCategory.toString() !== product.proSubCategoryId.toString()) {
+                return false;
+            }
+            if (coupon.applicableProduct && !product.proVariantId.includes(coupon.applicableProduct.toString())) {
+                return false;
+            }
+            return true;
+        });
+
+        if (isValid) {
+            return res.json({ success: true, message: "Coupon is applicable for the provided products.", data: coupon });
+        } else {
+            return res.json({ success: false, message: "Coupon is not applicable for the provided products." });
+        }
+    } catch (error) {
+        console.error('Error checking coupon code:', error);
+        return res.status(500).json({ success: false, message: "Internal server error." });
+    }
+}));
+
+module.exports = router;const express = require('express');
+const router = express.Router();
+const asyncHandler = require('express-async-handler');
+const Notification = require('../model/notification');
+const axios = require('axios');
+const dotenv = require('dotenv');
+dotenv.config();
+
+const ONE_SIGNAL_APP_ID = process.env.ONE_SIGNAL_APP_ID;
+const ONE_SIGNAL_REST_API_KEY = process.env.ONE_SIGNAL_REST_API_KEY;
+
+// Send notification
+router.post('/send-notification', asyncHandler(async (req, res) => {
+    const { title, description, imageUrl } = req.body;
+
+    const notificationBody = {
+        app_id: ONE_SIGNAL_APP_ID,
+        headings: { en: title },
+        contents: { en: description },
+        included_segments: ['All'],
+        ...(imageUrl && { big_picture: imageUrl })
+    };
+
+    try {
+        const response = await axios.post(
+            'https://onesignal.com/api/v1/notifications',
+            notificationBody,
+            {
+                headers: {
+                    'Authorization': `Basic ${ONE_SIGNAL_REST_API_KEY}`,
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
+
+        const notificationId = response.data.id;
+        console.log('Notification sent to all users:', notificationId);
+
+        const notification = new Notification({ notificationId, title, description, imageUrl });
+        await notification.save();
+
+        res.json({ success: true, message: 'Notification sent successfully', data: null });
+    } catch (error) {
+        console.error('Error sending notification:', error.response?.data || error.message);
+        res.status(500).json({ success: false, message: 'Failed to send notification', data: null });
+    }
+}));
+
+// Track notification
+router.get('/track-notification/:id', asyncHandler(async (req, res) => {
+    const notificationId = req.params.id;
+
+    try {
+        const response = await axios.get(
+            `https://onesignal.com/api/v1/notifications/${notificationId}?app_id=${ONE_SIGNAL_APP_ID}`,
+            {
+                headers: {
+                    'Authorization': `Basic ${ONE_SIGNAL_REST_API_KEY}`
+                }
+            }
+        );
+
+        const androidStats = response.data.platform_delivery_stats;
+        const result = {
+            platform: 'Android',
+            success_delivery: androidStats.android.successful,
+            failed_delivery: androidStats.android.failed,
+            errored_delivery: androidStats.android.errored,
+            opened_notification: androidStats.android.converted
+        };
+
+        console.log('Notification details:', androidStats);
+        res.json({ success: true, message: 'Success', data: result });
+    } catch (error) {
+        console.error('Error tracking notification:', error.response?.data || error.message);
+        res.status(500).json({ success: false, message: 'Failed to track notification', data: null });
+    }
+}));
+
+// Get all notifications
+router.get('/all-notification', asyncHandler(async (req, res) => {
+    try {
+        const notifications = await Notification.find({}).sort({ _id: -1 });
+        res.json({ success: true, message: 'Notifications retrieved successfully.', data: notifications });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message, data: null });
+    }
+}));
+
+// Delete notification
+router.delete('/delete-notification/:id', asyncHandler(async (req, res) => {
+    const notificationID = req.params.id;
+    try {
+        const notification = await Notification.findByIdAndDelete(notificationID);
+        if (!notification) {
+            return res.status(404).json({ success: false, message: 'Notification not found.', data: null });
+        }
+        res.json({ success: true, message: 'Notification deleted successfully.', data: null });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message, data: null });
+    }
+}));
+
+
+module.exports = router;
+const express = require('express');
+const asyncHandler = require('express-async-handler');
+const router = express.Router();
+const Order = require('../model/order');
+const Product = require('../model/product');
+
+// Get all orders
+router.get('/', asyncHandler(async (req, res) => {
+    try {
+        const orders = await Order.find()
+        .populate('couponCode', 'id couponCode discountType discountAmount')
+        .populate('userID', 'id name').sort({ _id: -1 });
+        res.json({ success: true, message: "Orders retrieved successfully.", data: orders });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Get orders by user ID
+router.get('/orderByUserId/:userId', asyncHandler(async (req, res) => {
+    try {
+        const userId = req.params.userId;
+        const orders = await Order.find({ userID: userId })
+            .populate('couponCode', 'id couponCode discountType discountAmount')
+            .populate('userID', 'id name')
+            .sort({ _id: -1 });
+        res.json({ success: true, message: "Orders retrieved successfully.", data: orders });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Get an order by ID
+router.get('/:id', asyncHandler(async (req, res) => {
+    try {
+        const orderID = req.params.id;
+        const order = await Order.findById(orderID)
+        .populate('couponCode', 'id couponCode discountType discountAmount')
+        .populate('userID', 'id name');
+        if (!order) {
+            return res.status(404).json({ success: false, message: "Order not found." });
+        }
+        res.json({ success: true, message: "Order retrieved successfully.", data: order });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Create a new order
+router.post('/', asyncHandler(async (req, res) => {
+    const { userID, orderStatus, items, totalPrice, shippingAddress, paymentMethod, paymentStatus, paymentProof, couponCode, orderTotal, trackingUrl } = req.body;
+    
+    if (!userID || !items || !totalPrice || !shippingAddress || !paymentMethod || !orderTotal) {
+        return res.status(400).json({ success: false, message: "User ID, items, totalPrice, shippingAddress, paymentMethod, and orderTotal are required." });
+    }
+
+    // Validate payment method
+    const validPaymentMethods = ['cod', 'cbe', 'telebirr'];
+    if (!validPaymentMethods.includes(paymentMethod)) {
+        return res.status(400).json({ success: false, message: "Invalid payment method." });
+    }
+
+    // Set default payment status if not provided
+    const finalPaymentStatus = paymentStatus || (paymentMethod === 'cod' ? 'pending' : 'pending');
+    const finalOrderStatus = orderStatus || (paymentMethod === 'cod' ? 'pending' : 'payment_pending');
+
+    try {
+        // Add product owner info to each item
+        const itemsWithOwners = await Promise.all(
+            items.map(async (item) => {
+                const product = await Product.findById(item.productID).select('createdBy');
+                return {
+                    ...item,
+                    productOwner: product ? product.createdBy : null
+                };
+            })
+        );
+
+        const order = new Order({ 
+            userID, 
+            orderStatus: finalOrderStatus, 
+            items: itemsWithOwners, 
+            totalPrice, 
+            shippingAddress, 
+            paymentMethod, 
+            paymentStatus: finalPaymentStatus,
+            paymentProof,
+            couponCode, 
+            orderTotal, 
+            trackingUrl 
+        });
+        const newOrder = await order.save();
+        res.json({ success: true, message: "Order created successfully.", data: newOrder });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Update an order status
+router.put('/:id', asyncHandler(async (req, res) => {
+    try {
+        const orderID = req.params.id;
+        const { orderStatus, trackingUrl } = req.body;
+        if (!orderStatus) {
+            return res.status(400).json({ success: false, message: "Order Status required." });
+        }
+
+        const updatedOrder = await Order.findByIdAndUpdate(
+            orderID,
+            { orderStatus, trackingUrl },
+            { new: true }
+        );
+
+        if (!updatedOrder) {
+            return res.status(404).json({ success: false, message: "Order not found." });
+        }
+
+        res.json({ success: true, message: "Order updated successfully.", data: updatedOrder });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Verify payment (admin endpoint)
+router.put('/:id/verify-payment', asyncHandler(async (req, res) => {
+    try {
+        const orderID = req.params.id;
+        const { verified, adminNotes } = req.body;
+        
+        if (typeof verified !== 'boolean') {
+            return res.status(400).json({ success: false, message: "Verification status (verified) is required and must be boolean." });
+        }
+
+        const order = await Order.findById(orderID);
+        if (!order) {
+            return res.status(404).json({ success: false, message: "Order not found." });
+        }
+
+        // Update payment status and order status
+        order.paymentStatus = verified ? 'verified' : 'failed';
+        order.orderStatus = verified ? 'processing' : 'cancelled';
+        
+        // Update payment proof verification if payment proof exists
+        if (order.paymentProof) {
+            order.paymentProof.verified = verified;
+            order.paymentProof.verifiedAt = verified ? new Date() : null;
+        }
+
+        const updatedOrder = await order.save();
+
+        res.json({ 
+            success: true, 
+            message: `Payment ${verified ? 'verified' : 'rejected'} successfully.`,
+            data: updatedOrder
+        });
+    } catch (error) {
+        console.error('Error verifying payment:', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Update payment proof
+router.put('/:id/payment-proof', asyncHandler(async (req, res) => {
+    try {
+        const orderID = req.params.id;
+        const { imageUrl } = req.body;
+        
+        if (!imageUrl) {
+            return res.status(400).json({ success: false, message: "Image URL is required." });
+        }
+
+        const order = await Order.findById(orderID);
+        if (!order) {
+            return res.status(404).json({ success: false, message: "Order not found." });
+        }
+
+        // Update or create payment proof
+        order.paymentProof = {
+            imageUrl: imageUrl,
+            uploadedAt: new Date(),
+            verified: false,
+            verifiedAt: null
+        };
+
+        // For non-COD payments, set status to payment pending
+        if (order.paymentMethod !== 'cod') {
+            order.orderStatus = 'payment_pending';
+            order.paymentStatus = 'pending';
+        }
+
+        const updatedOrder = await order.save();
+
+        res.json({ 
+            success: true, 
+            message: "Payment proof updated successfully.",
+            data: updatedOrder
+        });
+    } catch (error) {
+        console.error('Error updating payment proof:', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Get orders by payment status
+router.get('/payment-status/:status', asyncHandler(async (req, res) => {
+    try {
+        const paymentStatus = req.params.status;
+        const validStatuses = ['pending', 'verified', 'failed'];
+        
+        if (!validStatuses.includes(paymentStatus)) {
+            return res.status(400).json({ success: false, message: "Invalid payment status." });
+        }
+
+        const orders = await Order.find({ paymentStatus: paymentStatus })
+            .populate('couponCode', 'id couponCode discountType discountAmount')
+            .populate('userID', 'id name')
+            .sort({ _id: -1 });
+
+        res.json({ success: true, message: "Orders retrieved successfully.", data: orders });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Get orders requiring payment verification (admin endpoint)
+router.get('/admin/pending-verification', asyncHandler(async (req, res) => {
+    try {
+        const orders = await Order.find({ 
+            paymentMethod: { $in: ['cbe', 'telebirr'] },
+            paymentStatus: 'pending',
+            'paymentProof.imageUrl': { $exists: true, $ne: null }
+        })
+        .populate('couponCode', 'id couponCode discountType discountAmount')
+        .populate('userID', 'id name')
+        .sort({ _id: -1 });
+
+        res.json({ 
+            success: true, 
+            message: "Orders pending payment verification retrieved successfully.", 
+            data: orders 
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Delete an order
+router.delete('/:id', asyncHandler(async (req, res) => {
+    try {
+        const orderID = req.params.id;
+        const deletedOrder = await Order.findByIdAndDelete(orderID);
+        if (!deletedOrder) {
+            return res.status(404).json({ success: false, message: "Order not found." });
+        }
+        res.json({ success: true, message: "Order deleted successfully." });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+module.exports = router;const express = require('express');
+const asyncHandler = require('express-async-handler');
+const router = express.Router();
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+const { uploadPaymentProof, cloudinary } = require('../uploadFile');
+
+// Upload payment proof to Cloudinary
+router.post('/upload-proof', uploadPaymentProof.single('proofImage'), asyncHandler(async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "No file uploaded." });
+    }
+
+    const imageUrl = req.file.path; // Cloudinary URL
+    
+    res.json({ 
+      success: true, 
+      message: "Payment proof uploaded successfully.", 
+      data: {
+        imageUrl: imageUrl
+      }
+    });
+  } catch (error) {
+    console.error('🔴 [UPLOAD] Error uploading payment proof:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+}));
+
+// Alternative endpoint for base64 image upload to Cloudinary
+router.post('/upload-proof-base64', asyncHandler(async (req, res) => {
+  try {
+    console.log('🟡 [UPLOAD-BASE64] Received upload request');
+    const { image, fileName, orderAmount } = req.body;
+    
+    if (!image || !fileName) {
+      console.log('🔴 [UPLOAD-BASE64] Missing image or fileName');
+      return res.status(400).json({ success: false, message: "Image data and filename are required." });
+    }
+
+    console.log('🟡 [UPLOAD-BASE64] Processing image, fileName:', fileName);
+
+    // Remove data:image/jpeg;base64, prefix if present
+    const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
+    
+    try {
+      // Upload base64 image directly to Cloudinary
+      const uploadResponse = await cloudinary.uploader.upload(
+        `data:image/png;base64,${base64Data}`, 
+        {
+          folder: 'payment-proofs',
+          public_id: `payment_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+          resource_type: 'image'
+        }
+      );
+
+      console.log('🟡 [UPLOAD-BASE64] Cloudinary upload successful');
+      
+      res.json({ 
+        success: true, 
+        message: "Payment proof uploaded successfully.", 
+        data: {
+          imageUrl: uploadResponse.secure_url,
+          verified: false,
+          verifiedAt: null
+        }
+      });
+      
+      console.log('🟡 [UPLOAD-BASE64] Response sent successfully');
+      
+    } catch (uploadError) {
+      console.error('🔴 [UPLOAD-BASE64] Cloudinary upload error:', uploadError);
+      throw uploadError;
+    }
+    
+  } catch (error) {
+    console.error('🔴 [UPLOAD-BASE64] Error uploading payment proof:', error);
+    console.error('🔴 [UPLOAD-BASE64] Error stack:', error.stack);
+    res.status(500).json({ success: false, message: error.message });
+  }
+}));
+
+// Verify payment (admin endpoint)
+router.post('/verify-payment/:orderId', asyncHandler(async (req, res) => {
+  try {
+    const orderId = req.params.orderId;
+    const { verified, adminNotes } = req.body;
+    
+    // Update order payment status
+    const Order = require('../model/order');
+    const updatedOrder = await Order.findByIdAndUpdate(
+      orderId,
+      { 
+        paymentStatus: verified ? 'verified' : 'failed',
+        orderStatus: verified ? 'processing' : 'cancelled',
+        'paymentProof.verifiedAt': verified ? new Date() : null,
+        adminNotes: adminNotes
+      },
+      { new: true }
+    );
+
+    if (!updatedOrder) {
+      return res.status(404).json({ success: false, message: "Order not found." });
+    }
+
+    res.json({ 
+      success: true, 
+      message: `Payment ${verified ? 'verified' : 'rejected'} successfully.`,
+      data: updatedOrder
+    });
+  } catch (error) {
+    console.error('Error verifying payment:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+}));
+
+module.exports = router;
+const express = require('express');
+const router = express.Router();
+const Poster = require('../model/poster');
+const { uploadPosters } = require('../uploadFile');
+const multer = require('multer');
+const asyncHandler = require('express-async-handler');
+const { verifyAdmin } = require('../middleware/auth');
+
+// Get all posters - FILTER BY ADMIN
+router.get('/', asyncHandler(async (req, res) => {
+    try {
+        const { adminId } = req.query;
+        
+        let filter = {};
+        if (adminId) {
+            filter.createdBy = adminId;
+        }
+
+        const posters = await Poster.find(filter)
+            .populate('createdBy', 'username name')
+            .sort({ _id: -1 });
+        
+        res.json({ success: true, message: "Posters retrieved successfully.", data: posters });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Get a poster by ID
+router.get('/:id', asyncHandler(async (req, res) => {
+    try {
+        const posterID = req.params.id;
+        const poster = await Poster.findById(posterID)
+            .populate('createdBy', 'username name');
+            
+        if (!poster) {
+            return res.status(404).json({ success: false, message: "Poster not found." });
+        }
+        res.json({ success: true, message: "Poster retrieved successfully.", data: poster });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Create a new poster - SIMPLE ADMIN CHECK
+router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        uploadPosters.single('img')(req, res, async function (err) {
+            if (err instanceof multer.MulterError) {
+                return res.json({ success: false, message: err.message });
+            } else if (err) {
+                return res.json({ success: false, message: err.message });
+            }
+            const { posterName, adminId } = req.body;
+            let imageUrl = '';
+
+            if (req.file) {
+                imageUrl = req.file.path;
+            }
+
+            if (!posterName) {
+                return res.status(400).json({ success: false, message: "Name is required." });
+            }
+
+            if (!imageUrl) {
+                return res.status(400).json({ success: false, message: "Image is required." });
+            }
+
+            try {
+                const newPoster = new Poster({
+                    posterName: posterName,
+                    imageUrl: imageUrl,
+                    createdBy: adminId
+                });
+                await newPoster.save();
+                res.json({ success: true, message: "Poster created successfully.", data: newPoster });
+            } catch (error) {
+                res.status(500).json({ success: false, message: error.message });
+            }
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+}));
+
+// Update a poster - SIMPLE OWNERSHIP CHECK
+router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        const posterID = req.params.id;
+        uploadPosters.single('img')(req, res, async function (err) {
+            if (err instanceof multer.MulterError) {
+                return res.json({ success: false, message: err.message });
+            } else if (err) {
+                return res.json({ success: false, message: err.message });
+            }
+
+            const { posterName, adminId } = req.body;
+            let image = req.body.image;
+
+            if (req.file) {
+                image = req.file.path;
+            }
+
+            if (!posterName || !image) {
+                return res.status(400).json({ success: false, message: "Name and image are required." });
+            }
+
+            try {
+                // Find poster and check ownership
+                const poster = await Poster.findById(posterID);
+                if (!poster) {
+                    return res.status(404).json({ success: false, message: "Poster not found." });
+                }
+
+                // Super admin can edit anything, regular admins only their own
+                if (req.admin.clearanceLevel !== 'super_admin' && poster.createdBy.toString() !== adminId) {
+                    return res.status(403).json({ success: false, message: "You can only edit your own posters." });
+                }
+
+                const updatedPoster = await Poster.findByIdAndUpdate(
+                    posterID, 
+                    { posterName: posterName, imageUrl: image }, 
+                    { new: true }
+                );
+                
+                res.json({ success: true, message: "Poster updated successfully.", data: updatedPoster });
+            } catch (error) {
+                res.status(500).json({ success: false, message: error.message });
+            }
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+}));
+
+// Delete a poster - SIMPLE OWNERSHIP CHECK
+router.delete('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+    const posterID = req.params.id;
+    const { adminId } = req.body;
+    
+    try {
+        // Find poster and check ownership
+        const poster = await Poster.findById(posterID);
+        if (!poster) {
+            return res.status(404).json({ success: false, message: "Poster not found." });
+        }
+
+        // Super admin can delete anything, regular admins only their own
+        if (req.admin.clearanceLevel !== 'super_admin' && poster.createdBy.toString() !== adminId) {
+            return res.status(403).json({ success: false, message: "You can only delete your own posters." });
+        }
+
+        await Poster.findByIdAndDelete(posterID);
+        res.json({ success: true, message: "Poster deleted successfully." });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+module.exports = router;const express = require('express');
+const router = express.Router();
+const Product = require('../model/product');
+const multer = require('multer');
+const { uploadProduct } = require('../uploadFile');
+const asyncHandler = require('express-async-handler');
+const { verifyAdmin } = require('../middleware/auth');
+
+// Get all products - FILTER BY ADMIN
+router.get('/', asyncHandler(async (req, res) => {
+    try {
+        const { adminId } = req.query;
+        
+        let filter = {};
+        if (adminId) {
+            filter.createdBy = adminId;
+        }
+
+        const products = await Product.find(filter)
+            .populate('proCategoryId', 'id name')
+            .populate('proSubCategoryId', 'id name')
+            .populate('proBrandId', 'id name')
+            .populate('proVariantTypeId', 'id type')
+            .populate('proVariantId', 'id name')
+            .populate('createdBy', 'username name')
+            .sort({ _id: -1 });
+        res.json({ success: true, message: "Products retrieved successfully.", data: products });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Get a product by ID
+router.get('/:id', asyncHandler(async (req, res) => {
+    try {
+        const productID = req.params.id;
+        const product = await Product.findById(productID)
+            .populate('proCategoryId', 'id name')
+            .populate('proSubCategoryId', 'id name')
+            .populate('proBrandId', 'id name')
+            .populate('proVariantTypeId', 'id name')
+            .populate('proVariantId', 'id name')
+            .populate('createdBy', 'username name');
+        
+        if (!product) {
+            return res.status(404).json({ success: false, message: "Product not found." });
+        }
+        
+        res.json({ success: true, message: "Product retrieved successfully.", data: product });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Create new product - SIMPLE ADMIN CHECK
+router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
+    try {
+        uploadProduct.fields([
+            { name: 'image1', maxCount: 1 },
+            { name: 'image2', maxCount: 1 },
+            { name: 'image3', maxCount: 1 },
+            { name: 'image4', maxCount: 1 },
+            { name: 'image5', maxCount: 1 }
+        ])(req, res, async function (err) {
+            if (err instanceof multer.MulterError) {
+                return res.status(400).json({ success: false, message: `File upload error: ${err.message}` });
+            } else if (err) {
+                return res.status(500).json({ success: false, message: `Upload failed: ${err.message}` });
+            }
+
+            try {
+                const { name, description, quantity, price, offerPrice, proCategoryId, proSubCategoryId, proBrandId, proVariantTypeId, proVariantId, adminId } = req.body;
+
+                if (!name || !quantity || !price || !proCategoryId || !proSubCategoryId) {
+                    return res.status(400).json({ success: false, message: "Name, quantity, price, category, and subcategory are required." });
+                }
+
+                // Process images
+                const imageUrls = [];
+                const fields = ['image1', 'image2', 'image3', 'image4', 'image5'];
+                fields.forEach((field, index) => {
+                    if (req.files[field] && req.files[field].length > 0) {
+                        const file = req.files[field][0];
+                        imageUrls.push({ image: index + 1, url: file.path });
+                    }
+                });
+
+                if (imageUrls.length === 0) {
+                    return res.status(400).json({ success: false, message: "At least one product image is required." });
+                }
+                
+                const newProduct = new Product({ 
+                    name, description, 
+                    quantity: parseInt(quantity),
+                    price: parseFloat(price),
+                    offerPrice: offerPrice ? parseFloat(offerPrice) : undefined,
+                    proCategoryId, proSubCategoryId, proBrandId,
+                    proVariantTypeId, 
+                    proVariantId: proVariantId ? (Array.isArray(proVariantId) ? proVariantId : [proVariantId]) : [],
+                    createdBy: adminId,
+                    images: imageUrls 
+                });
+
+                await newProduct.save();
+                res.json({ success: true, message: "Product created successfully.", data: newProduct });
+
+            } catch (dbError) {
+                res.status(500).json({ success: false, message: `Database error: ${dbError.message}` });
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Update a product - SIMPLE OWNERSHIP CHECK
+router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+    const productId = req.params.id;
+    try {
+        uploadProduct.fields([
+            { name: 'image1', maxCount: 1 },
+            { name: 'image2', maxCount: 1 },
+            { name: 'image3', maxCount: 1 },
+            { name: 'image4', maxCount: 1 },
+            { name: 'image5', maxCount: 1 }
+        ])(req, res, async function (err) {
+            if (err instanceof multer.MulterError) {
+                return res.status(400).json({ success: false, message: `File upload error: ${err.message}` });
+            } else if (err) {
+                return res.status(500).json({ success: false, message: `Upload failed: ${err.message}` });
+            }
+
+            try {
+                const { name, description, quantity, price, offerPrice, proCategoryId, proSubCategoryId, proBrandId, proVariantTypeId, proVariantId, adminId } = req.body;
+
+                // Find product and check ownership
+                const product = await Product.findById(productId);
+                if (!product) {
+                    return res.status(404).json({ success: false, message: "Product not found." });
+                }
+
+                // Super admin can edit anything, regular admins only their own
+                if (req.admin.clearanceLevel !== 'super_admin' && product.createdBy.toString() !== adminId) {
+                    return res.status(403).json({ success: false, message: "You can only edit your own products." });
+                }
+
+                // Update fields
+                if (name) product.name = name;
+                if (description) product.description = description;
+                if (quantity) product.quantity = parseInt(quantity);
+                if (price) product.price = parseFloat(price);
+                if (offerPrice) product.offerPrice = parseFloat(offerPrice);
+                if (proCategoryId) product.proCategoryId = proCategoryId;
+                if (proSubCategoryId) product.proSubCategoryId = proSubCategoryId;
+                if (proBrandId) product.proBrandId = proBrandId;
+                if (proVariantTypeId) product.proVariantTypeId = proVariantTypeId;
+                if (proVariantId) product.proVariantId = Array.isArray(proVariantId) ? proVariantId : [proVariantId];
+
+                // Update images if new ones uploaded
+                const fields = ['image1', 'image2', 'image3', 'image4', 'image5'];
+                fields.forEach((field, index) => {
+                    if (req.files[field] && req.files[field].length > 0) {
+                        const file = req.files[field][0];
+                        const imageUrl = file.path;
+                        
+                        let imageEntry = product.images.find(img => img.image === (index + 1));
+                        if (imageEntry) {
+                            imageEntry.url = imageUrl;
+                        } else {
+                            product.images.push({ image: index + 1, url: imageUrl });
+                        }
+                    }
+                });
+
+                await product.save();
+                res.json({ success: true, message: "Product updated successfully.", data: product });
+            } catch (dbError) {
+                res.status(500).json({ success: false, message: `Database error: ${dbError.message}` });
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Delete a product - SIMPLE OWNERSHIP CHECK
+router.delete('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+    const productID = req.params.id;
+    const { adminId } = req.body;
+    
+    try {
+        const product = await Product.findById(productID);
+        if (!product) {
+            return res.status(404).json({ success: false, message: "Product not found." });
+        }
+
+        // Super admin can delete anything, regular admins only their own
+        if (req.admin.clearanceLevel !== 'super_admin' && product.createdBy.toString() !== adminId) {
+            return res.status(403).json({ success: false, message: "You can only delete your own products." });
+        }
+
+        await Product.findByIdAndDelete(productID);
+        res.json({ success: true, message: "Product deleted successfully." });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+module.exports = router;const express = require('express');
+const asyncHandler = require('express-async-handler');
+const router = express.Router();
+const Rating = require('../model/rating');
+const mongoose = require('mongoose'); // ADD THIS LINE
+
+// Get ratings for a product with pagination
+router.get('/product/:productId', asyncHandler(async (req, res) => {
+  try {
+    const { productId } = req.params;
+    const { page = 1, limit = 10 } = req.query;
+    
+    const ratings = await Rating.find({ productId })
+      .sort({ createdAt: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+    
+    const count = await Rating.countDocuments({ productId });
+    
+    res.json({
+      success: true,
+      message: "Ratings retrieved successfully.",
+      data: {
+        ratings,
+        totalPages: Math.ceil(count / limit),
+        currentPage: parseInt(page),
+        ratingCount: count
+      }
+    });
+  } catch (error) {
+    console.error('Error getting ratings:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+}));
+
+// Get rating stats for a product
+router.get('/product/:productId/stats', asyncHandler(async (req, res) => {
+  try {
+    const { productId } = req.params;
+    
+    const stats = await Rating.aggregate([
+      { $match: { productId: new mongoose.Types.ObjectId(productId) } }, // This line needs mongoose
+      {
+        $group: {
+          _id: '$productId',
+          averageRating: { $avg: '$rating' },
+          ratingCount: { $sum: 1 },
+          distribution: {
+            $push: '$rating'
+          }
+        }
+      }
+    ]);
+    
+    if (stats.length === 0) {
+      return res.json({
+        success: true,
+        message: "No ratings found.",
+        data: {
+          averageRating: 0,
+          ratingCount: 0,
+          distribution: { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 }
+        }
+      });
+    }
+    
+    // Calculate distribution
+    const distribution = { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 };
+    stats[0].distribution.forEach(rating => {
+      distribution[rating.toString()]++;
+    });
+    
+    res.json({
+      success: true,
+      message: "Rating stats retrieved successfully.",
+      data: {
+        averageRating: parseFloat(stats[0].averageRating.toFixed(1)),
+        ratingCount: stats[0].ratingCount,
+        distribution
+      }
+    });
+  } catch (error) {
+    console.error('Error getting rating stats:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+}));
+
+// Get user's rating for a product
+router.get('/product/:productId/user/:userId', asyncHandler(async (req, res) => {
+  try {
+    const { productId, userId } = req.params;
+    
+    const rating = await Rating.findOne({ 
+      productId, 
+      userId 
+    });
+    
+    // Return 200 with null data instead of 404
+    res.json({
+      success: true,
+      message: rating ? "User rating retrieved successfully." : "No rating found.",
+      data: rating || null
+    });
+    
+  } catch (error) {
+    console.error('Error getting user rating:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+}));
+
+// Create or update rating
+router.post('/', asyncHandler(async (req, res) => {
+  try {
+    const { productId, userId, userName, rating, review } = req.body;
+    
+    if (!productId || !userId || !userName || !rating) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Product ID, User ID, User Name, and Rating are required." 
+      });
+    }
+    
+    // Check if user already rated this product
+    const existingRating = await Rating.findOne({ productId, userId });
+    
+    if (existingRating) {
+      // Update existing rating
+      existingRating.rating = rating;
+      existingRating.review = review || existingRating.review;
+      await existingRating.save();
+      
+      res.json({
+        success: true,
+        message: "Rating updated successfully.",
+        data: existingRating
+      });
+    } else {
+      // Create new rating
+      const newRating = new Rating({
+        productId,
+        userId,
+        userName,
+        rating,
+        review: review || ''
+      });
+      
+      await newRating.save();
+      
+      res.json({
+        success: true,
+        message: "Rating created successfully.",
+        data: newRating
+      });
+    }
+  } catch (error) {
+    console.error('Error creating rating:', error);
+    if (error.code === 11000) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "You have already rated this product." 
+      });
+    }
+    res.status(500).json({ success: false, message: error.message });
+  }
+}));
+
+// Update a rating
+router.put('/:id', asyncHandler(async (req, res) => {
+  try {
+    const ratingId = req.params.id;
+    const { rating, review } = req.body;
+    
+    const updatedRating = await Rating.findByIdAndUpdate(
+      ratingId,
+      { rating, review },
+      { new: true }
+    );
+    
+    if (!updatedRating) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Rating not found." 
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: "Rating updated successfully.",
+      data: updatedRating
+    });
+  } catch (error) {
+    console.error('Error updating rating:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+}));
+
+// Delete a rating
+router.delete('/:id', asyncHandler(async (req, res) => {
+  try {
+    const ratingId = req.params.id;
+    
+    const deletedRating = await Rating.findByIdAndDelete(ratingId);
+    
+    if (!deletedRating) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Rating not found." 
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: "Rating deleted successfully."
+    });
+  } catch (error) {
+    console.error('Error deleting rating:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+}));
+
+module.exports = router;
+const express = require('express');
+const router = express.Router();
+const SubCategory = require('../model/subCategory');
+const Brand = require('../model/brand');
+const Product = require('../model/product');
+const asyncHandler = require('express-async-handler');
+const { verifyAdmin } = require('../middleware/auth');
+
+// Get all sub-categories - FILTER BY ADMIN
+router.get('/', asyncHandler(async (req, res) => {
+    try {
+        const { adminId } = req.query;
+        
+        let filter = {};
+        if (adminId) {
+            filter.createdBy = adminId;
+        }
+
+        const subCategories = await SubCategory.find(filter)
+            .populate('categoryId')
+            .populate('createdBy', 'username name')
+            .sort({ _id: -1 });
+        
+        res.json({ success: true, message: "Sub-categories retrieved successfully.", data: subCategories });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Get a sub-category by ID
+router.get('/:id', asyncHandler(async (req, res) => {
+    try {
+        const subCategoryID = req.params.id;
+        const subCategory = await SubCategory.findById(subCategoryID)
+            .populate('categoryId')
+            .populate('createdBy', 'username name');
+            
+        if (!subCategory) {
+            return res.status(404).json({ success: false, message: "Sub-category not found." });
+        }
+        res.json({ success: true, message: "Sub-category retrieved successfully.", data: subCategory });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Create a new sub-category - SIMPLE ADMIN CHECK
+router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
+    const { name, categoryId, adminId } = req.body;
+    
+    if (!name || !categoryId) {
+        return res.status(400).json({ success: false, message: "Name and category ID are required." });
+    }
+
+    try {
+        const subCategory = new SubCategory({ name, categoryId, createdBy: adminId });
+        const newSubCategory = await subCategory.save();
+        res.json({ success: true, message: "Sub-category created successfully.", data: newSubCategory });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Update a sub-category - SIMPLE OWNERSHIP CHECK
+router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+    const subCategoryID = req.params.id;
+    const { name, categoryId, adminId } = req.body;
+    
+    if (!name || !categoryId) {
+        return res.status(400).json({ success: false, message: "Name and category ID are required." });
+    }
+
+    try {
+        // Find subcategory and check ownership
+        const subCategory = await SubCategory.findById(subCategoryID);
+        if (!subCategory) {
+            return res.status(404).json({ success: false, message: "Sub-category not found." });
+        }
+
+        // Super admin can edit anything, regular admins only their own
+        if (req.admin.clearanceLevel !== 'super_admin' && subCategory.createdBy.toString() !== adminId) {
+            return res.status(403).json({ success: false, message: "You can only edit your own sub-categories." });
+        }
+
+        const updatedSubCategory = await SubCategory.findByIdAndUpdate(
+            subCategoryID, 
+            { name, categoryId }, 
+            { new: true }
+        );
+        
+        res.json({ success: true, message: "Sub-category updated successfully.", data: updatedSubCategory });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Delete a sub-category - SIMPLE OWNERSHIP CHECK
+router.delete('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+    const subCategoryID = req.params.id;
+    const { adminId } = req.body;
+    
+    try {
+        // Find subcategory and check ownership
+        const subCategory = await SubCategory.findById(subCategoryID);
+        if (!subCategory) {
+            return res.status(404).json({ success: false, message: "Sub-category not found." });
+        }
+
+        // Super admin can delete anything, regular admins only their own
+        if (req.admin.clearanceLevel !== 'super_admin' && subCategory.createdBy.toString() !== adminId) {
+            return res.status(403).json({ success: false, message: "You can only delete your own sub-categories." });
+        }
+
+        // Check if any brand is associated with the sub-category
+        const brandCount = await Brand.countDocuments({ subcategoryId: subCategoryID });
+        if (brandCount > 0) {
+            return res.status(400).json({ success: false, message: "Cannot delete sub-category. It is associated with one or more brands." });
+        }
+
+        // Check if any products reference this sub-category
+        const products = await Product.find({ proSubCategoryId: subCategoryID });
+        if (products.length > 0) {
+            return res.status(400).json({ success: false, message: "Cannot delete sub-category. Products are referencing it." });
+        }
+
+        await SubCategory.findByIdAndDelete(subCategoryID);
+        res.json({ success: true, message: "Sub-category deleted successfully." });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+module.exports = router;const express = require('express');
+const asyncHandler = require('express-async-handler');
+const router = express.Router();
+const User = require('../model/user');
+
+// Get all users
+router.get('/', asyncHandler(async (req, res) => {
+    try {
+        const users = await User.find().select('-password');
+        res.json({ success: true, message: "Users retrieved successfully.", data: users });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Login
+router.post('/login', asyncHandler(async (req, res) => {
+    const { name, password } = req.body;
+
+    try {
+        // Check if the user exists
+        const user = await User.findOne({ name });
+
+        if (!user) {
+            return res.status(401).json({ success: false, message: "Invalid name or password." });
+        }
+
+        // SECURE password comparison with bcrypt
+        if (!(await user.correctPassword(password))) {
+            return res.status(401).json({ success: false, message: "Invalid name or password." });
+        }
+
+        // Authentication successful
+        const userResponse = {
+            _id: user._id,
+            name: user.name,
+            email: user.email,
+            emailVerified: user.emailVerified,
+            phone: user.phone,
+            phoneVerified: user.phoneVerified,
+            createdAt: user.createdAt
+        };
+
+        res.status(200).json({ success: true, message: "Login successful.", data: userResponse });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Get a user by ID
+router.get('/:id', asyncHandler(async (req, res) => {
+    try {
+        const userID = req.params.id;
+        const user = await User.findById(userID).select('-password');
+        if (!user) {
+            return res.status(404).json({ success: false, message: "User not found." });
+        }
+        res.json({ success: true, message: "User retrieved successfully.", data: user });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Register
+router.post('/register', asyncHandler(async (req, res) => {
+  const { name, email, password } = req.body;
+  if (!name || !password) {
+    return res.status(400).json({ success: false, message: "Name and password are required." });
+  }
+
+  try {
+    const user = new User({ name, email, password }); // Password will be hashed automatically
+    const newUser = await user.save();
+    
+    const userResponse = {
+        _id: newUser._id,
+        name: newUser.name,
+        email: newUser.email,
+        emailVerified: newUser.emailVerified,
+        createdAt: newUser.createdAt
+    };
+
+    res.json({ success: true, message: "User created successfully. Please verify your email.", data: userResponse });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({ success: false, message: "Email already exists." });
+    }
+    res.status(500).json({ success: false, message: error.message });
+  }
+}));
+
+// Update a user
+router.put('/:id', asyncHandler(async (req, res) => {
+    try {
+        const userID = req.params.id;
+        const { name, password, currentPassword } = req.body;
+        if (!name) {
+            return res.status(400).json({ success: false, message: "Name is required." });
+        }
+
+        const user = await User.findById(userID);
+        if (!user) {
+            return res.status(404).json({ success: false, message: "User not found." });
+        }
+
+        // If changing password, verify current password first
+        if (password) {
+            if (!currentPassword) {
+                return res.status(400).json({ success: false, message: "Current password is required to set new password." });
+            }
+            if (!(await user.correctPassword(currentPassword))) {
+                return res.status(400).json({ success: false, message: "Current password is incorrect." });
+            }
+            user.password = password; // Will be hashed automatically
+        }
+
+        user.name = name;
+        await user.save();
+
+        const userResponse = {
+            _id: user._id,
+            name: user.name,
+            email: user.email,
+            emailVerified: user.emailVerified,
+            updatedAt: user.updatedAt
+        };
+
+        res.json({ success: true, message: "User updated successfully.", data: userResponse });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Delete a user
+router.delete('/:id', asyncHandler(async (req, res) => {
+    try {
+        const userID = req.params.id;
+        const deletedUser = await User.findByIdAndDelete(userID);
+        if (!deletedUser) {
+            return res.status(404).json({ success: false, message: "User not found." });
+        }
+        res.json({ success: true, message: "User deleted successfully." });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+module.exports = router;const express = require('express');
+const router = express.Router();
+const Variant = require('../model/variant');
+const Product = require('../model/product');
+const asyncHandler = require('express-async-handler');
+const { verifyAdmin } = require('../middleware/auth');
+
+// Get all variants - FILTER BY ADMIN
+router.get('/', asyncHandler(async (req, res) => {
+    try {
+        const { adminId } = req.query;
+        
+        let filter = {};
+        if (adminId) {
+            filter.createdBy = adminId;
+        }
+
+        const variants = await Variant.find(filter)
+            .populate('variantTypeId')
+            .populate('createdBy', 'username name')
+            .sort({ _id: -1 });
+        
+        res.json({ success: true, message: "Variants retrieved successfully.", data: variants });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Get a variant by ID
+router.get('/:id', asyncHandler(async (req, res) => {
+    try {
+        const variantID = req.params.id;
+        const variant = await Variant.findById(variantID)
+            .populate('variantTypeId')
+            .populate('createdBy', 'username name');
+            
+        if (!variant) {
+            return res.status(404).json({ success: false, message: "Variant not found." });
+        }
+        res.json({ success: true, message: "Variant retrieved successfully.", data: variant });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Create a new variant - SIMPLE ADMIN CHECK
+router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
+    const { name, variantTypeId, adminId } = req.body;
+    
+    if (!name || !variantTypeId) {
+        return res.status(400).json({ success: false, message: "Name and VariantType ID are required." });
+    }
+
+    try {
+        const variant = new Variant({ name, variantTypeId, createdBy: adminId });
+        const newVariant = await variant.save();
+        res.json({ success: true, message: "Variant created successfully.", data: newVariant });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Update a variant - SIMPLE OWNERSHIP CHECK
+router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+    const variantID = req.params.id;
+    const { name, variantTypeId, adminId } = req.body;
+    
+    if (!name || !variantTypeId) {
+        return res.status(400).json({ success: false, message: "Name and VariantType ID are required." });
+    }
+
+    try {
+        // Find variant and check ownership
+        const variant = await Variant.findById(variantID);
+        if (!variant) {
+            return res.status(404).json({ success: false, message: "Variant not found." });
+        }
+
+        // Super admin can edit anything, regular admins only their own
+        if (req.admin.clearanceLevel !== 'super_admin' && variant.createdBy.toString() !== adminId) {
+            return res.status(403).json({ success: false, message: "You can only edit your own variants." });
+        }
+
+        const updatedVariant = await Variant.findByIdAndUpdate(
+            variantID, 
+            { name, variantTypeId }, 
+            { new: true }
+        );
+        
+        res.json({ success: true, message: "Variant updated successfully.", data: updatedVariant });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Delete a variant - SIMPLE OWNERSHIP CHECK
+router.delete('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+    const variantID = req.params.id;
+    const { adminId } = req.body;
+    
+    try {
+        // Find variant and check ownership
+        const variant = await Variant.findById(variantID);
+        if (!variant) {
+            return res.status(404).json({ success: false, message: "Variant not found." });
+        }
+
+        // Super admin can delete anything, regular admins only their own
+        if (req.admin.clearanceLevel !== 'super_admin' && variant.createdBy.toString() !== adminId) {
+            return res.status(403).json({ success: false, message: "You can only delete your own variants." });
+        }
+
+        // Check if any products reference this variant
+        const products = await Product.find({ proVariantId: variantID });
+        if (products.length > 0) {
+            return res.status(400).json({ success: false, message: "Cannot delete variant. Products are referencing it." });
+        }
+
+        await Variant.findByIdAndDelete(variantID);
+        res.json({ success: true, message: "Variant deleted successfully." });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+module.exports = router;const express = require('express');
+const router = express.Router();
+const VariantType = require('../model/variantType');
+const Product = require('../model/product');
+const Variant = require('../model/variant');
+const asyncHandler = require('express-async-handler');
+const { verifyAdmin } = require('../middleware/auth');
+
+// Get all variant types - FILTER BY ADMIN
+router.get('/', asyncHandler(async (req, res) => {
+    try {
+        const { adminId } = req.query;
+        
+        let filter = {};
+        if (adminId) {
+            filter.createdBy = adminId;
+        }
+
+        const variantTypes = await VariantType.find(filter)
+            .populate('createdBy', 'username name')
+            .sort({ _id: -1 });
+        
+        res.json({ success: true, message: "VariantTypes retrieved successfully.", data: variantTypes });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Get a variant type by ID
+router.get('/:id', asyncHandler(async (req, res) => {
+    try {
+        const variantTypeID = req.params.id;
+        const variantType = await VariantType.findById(variantTypeID)
+            .populate('createdBy', 'username name');
+            
+        if (!variantType) {
+            return res.status(404).json({ success: false, message: "VariantType not found." });
+        }
+        res.json({ success: true, message: "VariantType retrieved successfully.", data: variantType });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Create a new variant type - SIMPLE ADMIN CHECK
+router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
+    const { name, type, adminId } = req.body;
+    
+    if (!name) {
+        return res.status(400).json({ success: false, message: "Name is required." });
+    }
+
+    try {
+        const variantType = new VariantType({ name, type, createdBy: adminId });
+        const newVariantType = await variantType.save();
+        res.json({ success: true, message: "VariantType created successfully.", data: newVariantType });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Update a variant type - SIMPLE OWNERSHIP CHECK
+router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+    const variantTypeID = req.params.id;
+    const { name, type, adminId } = req.body;
+    
+    if (!name) {
+        return res.status(400).json({ success: false, message: "Name is required." });
+    }
+
+    try {
+        // Find variant type and check ownership
+        const variantType = await VariantType.findById(variantTypeID);
+        if (!variantType) {
+            return res.status(404).json({ success: false, message: "VariantType not found." });
+        }
+
+        // Super admin can edit anything, regular admins only their own
+        if (req.admin.clearanceLevel !== 'super_admin' && variantType.createdBy.toString() !== adminId) {
+            return res.status(403).json({ success: false, message: "You can only edit your own variant types." });
+        }
+
+        const updatedVariantType = await VariantType.findByIdAndUpdate(
+            variantTypeID, 
+            { name, type }, 
+            { new: true }
+        );
+        
+        res.json({ success: true, message: "VariantType updated successfully.", data: updatedVariantType });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+// Delete a variant type - SIMPLE OWNERSHIP CHECK
+router.delete('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+    const variantTypeID = req.params.id;
+    const { adminId } = req.body;
+    
+    try {
+        // Find variant type and check ownership
+        const variantType = await VariantType.findById(variantTypeID);
+        if (!variantType) {
+            return res.status(404).json({ success: false, message: "Variant type not found." });
+        }
+
+        // Super admin can delete anything, regular admins only their own
+        if (req.admin.clearanceLevel !== 'super_admin' && variantType.createdBy.toString() !== adminId) {
+            return res.status(403).json({ success: false, message: "You can only delete your own variant types." });
+        }
+
+        // Check if any variant is associated with this variant type
+        const variantCount = await Variant.countDocuments({ variantTypeId: variantTypeID });
+        if (variantCount > 0) {
+            return res.status(400).json({ success: false, message: "Cannot delete variant type. It is associated with one or more variants." });
+        }
+        
+        // Check if any products reference this variant type
+        const products = await Product.find({ proVariantTypeId: variantTypeID });
+        if (products.length > 0) {
+            return res.status(400).json({ success: false, message: "Cannot delete variant type. Products are referencing it." });
+        }
+
+        await VariantType.findByIdAndDelete(variantTypeID);
+        res.json({ success: true, message: "Variant type deleted successfully." });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+}));
+
+module.exports = router;const express = require('express');
+const asyncHandler = require('express-async-handler');
+const router = express.Router();
+const User = require('../model/user');
+const nodemailer = require('nodemailer');
+
+// Configure email transporter (using Gmail)
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASSWORD
+  }
+});
+
+// Send email verification code
+router.post('/send-email-verification', asyncHandler(async (req, res) => {
+  const { email } = req.body;
+  
+  if (!email) {
+    return res.status(400).json({ success: false, message: "Email is required." });
+  }
+
+  try {
+    // Generate random 6-digit code
+    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const codeExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    
+    // Check if email already exists and is verified
+    const existingUser = await User.findOne({ email, emailVerified: true });
+    if (existingUser) {
+      return res.status(400).json({ success: false, message: "Email already registered." });
+    }
+
+    // Send verification email
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: email,
+      subject: 'Email Verification Code - Your App',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #2D5A7E;">Email Verification</h2>
+          <p>Hello,</p>
+          <p>Your verification code is:</p>
+          <div style="background: #f4f4f4; padding: 15px; text-align: center; font-size: 24px; font-weight: bold; letter-spacing: 5px; margin: 20px 0;">
+            ${verificationCode}
+          </div>
+          <p>This code will expire in 10 minutes.</p>
+          <p>If you didn't request this verification, please ignore this email.</p>
+          <br>
+          <p>Best regards,<br>Your App Team</p>
+        </div>
+      `
+    };
+
+    await transporter.sendMail(mailOptions);
+    
+    // Save verification code to user (or create temp record)
+    await User.findOneAndUpdate(
+      { email },
+      { 
+        email: email,
+        verificationCode,
+        codeExpires,
+        emailVerified: false
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    res.json({ 
+      success: true, 
+      message: "Verification code sent to your email." 
+    });
+  } catch (error) {
+    console.error('Error sending verification code:', error);
+    
+    // For development, still return success with code
+    if (process.env.NODE_ENV === 'development') {
+      // Find the verification code that was attempted to be saved
+      const user = await User.findOne({ email });
+      const devCode = user ? user.verificationCode : 'unknown';
+      
+      res.json({ 
+        success: true, 
+        message: "Verification code sent (development mode).",
+        data: { code: devCode }
+      });
+    } else {
+      res.status(500).json({ success: false, message: "Failed to send verification code." });
+    }
+  }
+}));
+
+// Verify email
+router.post('/verify-email', asyncHandler(async (req, res) => {
+  const { email, code } = req.body;
+  
+  if (!email || !code) {
+    return res.status(400).json({ success: false, message: "Email and verification code are required." });
+  }
+
+  try {
+    const user = await User.findOne({ email, verificationCode: code });
+    
+    if (!user) {
+      return res.status(400).json({ success: false, message: "Invalid verification code." });
+    }
+
+    if (user.codeExpires < new Date()) {
+      return res.status(400).json({ success: false, message: "Verification code has expired." });
+    }
+
+    // Update user as verified
+    user.emailVerified = true;
+    user.verificationCode = null;
+    user.codeExpires = null;
+    await user.save();
+
+    console.log('🟡 [SERVER] Email verified successfully for:', email);
+    
+    const userResponse = {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        emailVerified: user.emailVerified,
+        phone: user.phone,
+        phoneVerified: user.phoneVerified
+    };
+    
+    res.json({ 
+      success: true, 
+      message: "Email verified successfully.",
+      data: userResponse
+    });
+  } catch (error) {
+    console.error('🔴 [SERVER] Error verifying email:', error);
+    res.status(500).json({ success: false, message: "Failed to verify email." });
+  }
+}));
+
+// Forgot password - send reset code to email
+router.post('/forgot-password', asyncHandler(async (req, res) => {
+  const { email } = req.body;
+  
+  if (!email) {
+    return res.status(400).json({ success: false, message: "Email is required." });
+  }
+
+  try {
+    const user = await User.findOne({ email, emailVerified: true });
+    
+    if (!user) {
+      return res.status(404).json({ success: false, message: "No verified account found with this email." });
+    }
+
+    // Generate reset code
+    const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const codeExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    user.verificationCode = resetCode;
+    user.codeExpires = codeExpires;
+    await user.save();
+
+    // Send reset email
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: email,
+      subject: 'Password Reset Code - Your App',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #2D5A7E;">Password Reset</h2>
+          <p>Hello ${user.name},</p>
+          <p>We received a request to reset your password. Your reset code is:</p>
+          <div style="background: #f4f4f4; padding: 15px; text-align: center; font-size: 24px; font-weight: bold; letter-spacing: 5px; margin: 20px 0;">
+            ${resetCode}
+          </div>
+          <p>This code will expire in 10 minutes.</p>
+          <p>If you didn't request a password reset, please ignore this email.</p>
+          <br>
+          <p>Best regards,<br>Your App Team</p>
+        </div>
+      `
+    };
+
+    await transporter.sendMail(mailOptions);
+
+    res.json({ 
+      success: true, 
+      message: "Password reset code sent to your email." 
+    });
+  } catch (error) {
+    console.error('Error in forgot password:', error);
+    
+    // For development
+    if (process.env.NODE_ENV === 'development') {
+      const user = await User.findOne({ email });
+      const devCode = user ? user.verificationCode : 'unknown';
+      
+      res.json({ 
+        success: true, 
+        message: "Reset code generated (development mode).",
+        data: { code: devCode }
+      });
+    } else {
+      res.status(500).json({ success: false, message: "Failed to process request." });
+    }
+  }
+}));
+
+// Reset password with code
+router.post('/reset-password', asyncHandler(async (req, res) => {
+  const { email, code, newPassword } = req.body;
+  
+  if (!email || !code || !newPassword) {
+    return res.status(400).json({ success: false, message: "Email, verification code, and new password are required." });
+  }
+
+  try {
+    const user = await User.findOne({ email, verificationCode: code, emailVerified: true });
+    
+    if (!user) {
+      return res.status(400).json({ success: false, message: "Invalid verification code or email not verified." });
+    }
+
+    if (user.codeExpires < new Date()) {
+      return res.status(400).json({ success: false, message: "Verification code has expired." });
+    }
+
+    // Update password and clear verification code
+    user.password = newPassword; // Will be hashed automatically
+    user.verificationCode = null;
+    user.codeExpires = null;
+    await user.save();
+
+    res.json({ 
+      success: true, 
+      message: "Password reset successfully." 
+    });
+  } catch (error) {
+    console.error('Error resetting password:', error);
+    res.status(500).json({ success: false, message: "Failed to reset password." });
+  }
+}));
+
+// Update user profile (for changing password/email in profile)
+router.put('/update-profile/:id', asyncHandler(async (req, res) => {
+  try {
+    const userID = req.params.id;
+    const { name, email, currentPassword, newPassword } = req.body;
+    
+    if (!name) {
+      return res.status(400).json({ success: false, message: "Name is required." });
+    }
+
+    const user = await User.findById(userID);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found." });
+    }
+
+    // Verify current password if changing password
+    if (newPassword) {
+      if (!currentPassword) {
+        return res.status(400).json({ success: false, message: "Current password is required to set new password." });
+      }
+      if (!(await user.correctPassword(currentPassword))) {
+        return res.status(400).json({ success: false, message: "Current password is incorrect." });
+      }
+      user.password = newPassword; // Will be hashed automatically
+    }
+
+    // Update email if provided and different
+    if (email && email !== user.email) {
+      user.email = email;
+      user.emailVerified = false; // Require re-verification for new email
+    }
+
+    user.name = name;
+    await user.save();
+
+    const userResponse = {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        emailVerified: user.emailVerified,
+        updatedAt: user.updatedAt
+    };
+
+    res.json({ 
+      success: true, 
+      message: "Profile updated successfully." + (email && email !== user.email ? " Please verify your new email." : ""),
+      data: userResponse 
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({ success: false, message: "Email already exists." });
+    }
+    res.status(500).json({ success: false, message: error.message });
+  }
+}));
+
+module.exports = router;const AdminUser = require('../model/adminUser');
+const asyncHandler = require('express-async-handler');
+
+// Simple admin verification
+const verifyAdmin = asyncHandler(async (req, res, next) => {
+  try {
+    const { adminId } = req.body;
+    
+    if (!adminId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Admin ID required." 
+      });
+    }
+
+    const adminUser = await AdminUser.findById(adminId);
+    if (!adminUser || !adminUser.isActive) {
+      return res.status(401).json({ 
+        success: false, 
+        message: "Invalid admin user." 
+      });
+    }
+
+    req.admin = adminUser;
+    next();
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      message: "Admin verification failed." 
+    });
+  }
+});
+
+module.exports = { verifyAdmin };

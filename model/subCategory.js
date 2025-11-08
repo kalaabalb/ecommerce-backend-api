@@ -1,3 +1,5 @@
+const mongoose = require('mongoose');
+
 const subCategorySchema = new mongoose.Schema({
     name: {
         type: String,
@@ -9,10 +11,11 @@ const subCategorySchema = new mongoose.Schema({
         ref: 'Category',
         required: [true, 'Category ID is required']
     },
-    // ADD THIS:
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'AdminUser',
         required: true
     }
 },{ timestamps: true });
+
+module.exports = mongoose.model('SubCategory', subCategorySchema);
