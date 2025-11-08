@@ -1,5 +1,3 @@
-const mongoose = require('mongoose');
-
 const couponSchema = new mongoose.Schema({
   couponCode: {
     type: String,
@@ -39,9 +37,11 @@ const couponSchema = new mongoose.Schema({
   applicableProduct: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Product'
+  },
+  // ADD THIS:
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'AdminUser',
+    required: true
   }
 }, { timestamps: true });
-
-const Coupon = mongoose.model('Coupon', couponSchema);
-
-module.exports = Coupon;

@@ -2,6 +2,7 @@ const express = require('express');
 const asyncHandler = require('express-async-handler');
 const router = express.Router();
 const Order = require('../model/order');
+const Product = require('../model/product');
 
 // Get all orders
 router.get('/', asyncHandler(async (req, res) => {
@@ -64,10 +65,21 @@ router.post('/', asyncHandler(async (req, res) => {
     const finalOrderStatus = orderStatus || (paymentMethod === 'cod' ? 'pending' : 'payment_pending');
 
     try {
+        // Add product owner info to each item
+        const itemsWithOwners = await Promise.all(
+            items.map(async (item) => {
+                const product = await Product.findById(item.productID).select('createdBy');
+                return {
+                    ...item,
+                    productOwner: product ? product.createdBy : null
+                };
+            })
+        );
+
         const order = new Order({ 
             userID, 
             orderStatus: finalOrderStatus, 
-            items, 
+            items: itemsWithOwners, 
             totalPrice, 
             shippingAddress, 
             paymentMethod, 

@@ -50,11 +50,11 @@ const productSchema = new mongoose.Schema({
             required: true
         }
     }],
-    // Add createdBy field to track who created this product - MADE OPTIONAL
+    // MADE REQUIRED - track who created this product
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'AdminUser'
-        // Removed: required: true
+        ref: 'AdminUser',
+        required: true // Changed to required
     }
 }, { timestamps: true });
 

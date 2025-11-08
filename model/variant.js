@@ -1,5 +1,3 @@
-const mongoose = require('mongoose');
-
 const variantSchema = new mongoose.Schema({
     name: {
         type: String,
@@ -9,7 +7,11 @@ const variantSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'VariantType',
         required: true
+    },
+    // ADD THIS:
+    createdBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'AdminUser',
+        required: true
     }
 },{ timestamps: true });
-
-module.exports = mongoose.model('Variant', variantSchema);

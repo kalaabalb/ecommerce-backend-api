@@ -1,5 +1,3 @@
-const mongoose = require('mongoose');
-
 const posterSchema = new mongoose.Schema({
   posterName: {
     type: String,
@@ -9,11 +7,13 @@ const posterSchema = new mongoose.Schema({
   imageUrl: {
     type: String,
     required: true
+  },
+  // ADD THIS:
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'AdminUser',
+    required: true
   }
 }, {
   timestamps: true 
 });
-
-const Poster = mongoose.model('Poster', posterSchema);
-
-module.exports = Poster;

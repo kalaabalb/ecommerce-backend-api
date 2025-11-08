@@ -1,6 +1,3 @@
-const mongoose = require('mongoose');
-
-// Define the Variant schema
 const variantTypeSchema = new mongoose.Schema({
     name: {
         type: String,
@@ -11,10 +8,11 @@ const variantTypeSchema = new mongoose.Schema({
         type: String,
         required: [true, 'Type is required'],
         trim: true
+    },
+    // ADD THIS:
+    createdBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'AdminUser',
+        required: true
     }
 },{ timestamps: true });
-
-// Create the Variant model
-const VariantType = mongoose.model('VariantType', variantTypeSchema);
-
-module.exports = VariantType;

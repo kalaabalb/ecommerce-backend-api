@@ -10,11 +10,11 @@ const orderSchema = new mongoose.Schema({
     type: Date,
     default: Date.now
   },
-orderStatus: {
-  type: String,
-  enum: ['pending', 'processing', 'shipped', 'delivered', 'cancelled', 'payment_pending', 'payment_verified'],
-  default: 'pending'
-},
+  orderStatus: {
+    type: String,
+    enum: ['pending', 'processing', 'shipped', 'delivered', 'cancelled', 'payment_pending', 'payment_verified'],
+    default: 'pending'
+  },
   items: [
     {
       productID: {
@@ -37,6 +37,11 @@ orderStatus: {
       variant: {
         type: String,
       },
+      // SIMPLE OWNER TRACKING - just to know which admin owns this product
+      productOwner: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'AdminUser'
+      }
     }
   ],
   totalPrice: {
@@ -78,7 +83,7 @@ orderStatus: {
   },
   trackingUrl: {
     type: String
-  },
+  }
 }, {
   timestamps: true
 });

@@ -1,21 +1,18 @@
-const mongoose = require('mongoose');
-
-// Define the SubCategory schema
 const subCategorySchema = new mongoose.Schema({
     name: {
         type: String,
-        required: [true, 'Name is required'], // Adding custom error message
+        required: [true, 'Name is required'],
         trim: true
     },
     categoryId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'Category', // This should match the model name you use when you create the Category model
+        ref: 'Category',
         required: [true, 'Category ID is required']
+    },
+    // ADD THIS:
+    createdBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'AdminUser',
+        required: true
     }
 },{ timestamps: true });
-
-// Create the SubCategory model
-const SubCategory = mongoose.model('SubCategory', subCategorySchema);
-
-module.exports = SubCategory;
-

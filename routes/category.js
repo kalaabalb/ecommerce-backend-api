@@ -6,11 +6,21 @@ const Product = require('../model/product');
 const { uploadCategory } = require('../uploadFile');
 const multer = require('multer');
 const asyncHandler = require('express-async-handler');
+const { verifyAdmin } = require('../middleware/auth');
 
-// Get all categories
+// Get all categories - FILTER BY ADMIN
 router.get('/', asyncHandler(async (req, res) => {
     try {
-        const categories = await Category.find();
+        const { adminId } = req.query;
+        
+        let filter = {};
+        if (adminId) {
+            filter.createdBy = adminId;
+        }
+
+        const categories = await Category.find(filter)
+            .populate('createdBy', 'username name')
+            .sort({ _id: -1 });
         res.json({ success: true, message: "Categories retrieved successfully.", data: categories });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
@@ -21,35 +31,33 @@ router.get('/', asyncHandler(async (req, res) => {
 router.get('/:id', asyncHandler(async (req, res) => {
     try {
         const categoryID = req.params.id;
-        const category = await Category.findById(categoryID);
+        const category = await Category.findById(categoryID)
+            .populate('createdBy', 'username name');
+        
         if (!category) {
             return res.status(404).json({ success: false, message: "Category not found." });
         }
+        
         res.json({ success: true, message: "Category retrieved successfully.", data: category });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
 }));
 
-// Create a new category with image upload to Cloudinary
-router.post('/', asyncHandler(async (req, res) => {
+// Create a new category - SIMPLE ADMIN CHECK
+router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
     try {
         uploadCategory.single('img')(req, res, async function (err) {
             if (err instanceof multer.MulterError) {
-                if (err.code === 'LIMIT_FILE_SIZE') {
-                    err.message = 'File size is too large. Maximum filesize is 5MB.';
-                }
-                console.log(`Add category: ${err}`);
                 return res.json({ success: false, message: err.message });
             } else if (err) {
-                console.log(`Add category: ${err}`);
                 return res.json({ success: false, message: err.message });
             }
-            const { name } = req.body;
+            
+            const { name, adminId } = req.body;
             let imageUrl = '';
 
             if (req.file) {
-                // Cloudinary provides the URL directly in req.file.path
                 imageUrl = req.file.path;
             }
 
@@ -64,44 +72,37 @@ router.post('/', asyncHandler(async (req, res) => {
             try {
                 const newCategory = new Category({
                     name: name,
-                    image: imageUrl
+                    image: imageUrl,
+                    createdBy: adminId
                 });
+                
                 await newCategory.save();
-                res.json({ success: true, message: "Category created successfully.", data: null });
+                res.json({ success: true, message: "Category created successfully.", data: newCategory });
             } catch (error) {
-                console.error("Error creating category:", error);
                 res.status(500).json({ success: false, message: error.message });
             }
-
         });
-
     } catch (err) {
-        console.log(`Error creating category: ${err.message}`);
         return res.status(500).json({ success: false, message: err.message });
     }
 }));
 
-// Update a category with Cloudinary
-router.put('/:id', asyncHandler(async (req, res) => {
+// Update a category - SIMPLE OWNERSHIP CHECK
+router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
     try {
         const categoryID = req.params.id;
         uploadCategory.single('img')(req, res, async function (err) {
             if (err instanceof multer.MulterError) {
-                if (err.code === 'LIMIT_FILE_SIZE') {
-                    err.message = 'File size is too large. Maximum filesize is 5MB.';
-                }
-                console.log(`Update category: ${err.message}`);
                 return res.json({ success: false, message: err.message });
             } else if (err) {
-                console.log(`Update category: ${err.message}`);
                 return res.json({ success: false, message: err.message });
             }
 
-            const { name } = req.body;
+            const { name, adminId } = req.body;
             let image = req.body.image;
 
             if (req.file) {
-                image = req.file.path; // Cloudinary URL
+                image = req.file.path;
             }
 
             if (!name || !image) {
@@ -109,27 +110,49 @@ router.put('/:id', asyncHandler(async (req, res) => {
             }
 
             try {
-                const updatedCategory = await Category.findByIdAndUpdate(categoryID, { name: name, image: image }, { new: true });
-                if (!updatedCategory) {
+                // Find category and check ownership
+                const category = await Category.findById(categoryID);
+                if (!category) {
                     return res.status(404).json({ success: false, message: "Category not found." });
                 }
-                res.json({ success: true, message: "Category updated successfully.", data: null });
+
+                // Super admin can edit anything, regular admins only their own
+                if (req.admin.clearanceLevel !== 'super_admin' && category.createdBy.toString() !== adminId) {
+                    return res.status(403).json({ success: false, message: "You can only edit your own categories." });
+                }
+
+                const updatedCategory = await Category.findByIdAndUpdate(
+                    categoryID, 
+                    { name: name, image: image }, 
+                    { new: true }
+                );
+                
+                res.json({ success: true, message: "Category updated successfully.", data: updatedCategory });
             } catch (error) {
                 res.status(500).json({ success: false, message: error.message });
             }
-
         });
-
     } catch (err) {
-        console.log(`Error updating category: ${err.message}`);
         return res.status(500).json({ success: false, message: err.message });
     }
 }));
 
-// Delete a category
-router.delete('/:id', asyncHandler(async (req, res) => {
+// Delete a category - SIMPLE OWNERSHIP CHECK
+router.delete('/:id', verifyAdmin, asyncHandler(async (req, res) => {
     try {
         const categoryID = req.params.id;
+        const { adminId } = req.body;
+
+        // Find category and check ownership
+        const category = await Category.findById(categoryID);
+        if (!category) {
+            return res.status(404).json({ success: false, message: "Category not found." });
+        }
+
+        // Super admin can delete anything, regular admins only their own
+        if (req.admin.clearanceLevel !== 'super_admin' && category.createdBy.toString() !== adminId) {
+            return res.status(403).json({ success: false, message: "You can only delete your own categories." });
+        }
 
         // Check if any subcategories reference this category
         const subcategories = await SubCategory.find({ categoryId: categoryID });
@@ -143,11 +166,7 @@ router.delete('/:id', asyncHandler(async (req, res) => {
             return res.status(400).json({ success: false, message: "Cannot delete category. Products are referencing it." });
         }
 
-        // If no subcategories or products are referencing the category, proceed with deletion
-        const category = await Category.findByIdAndDelete(categoryID);
-        if (!category) {
-            return res.status(404).json({ success: false, message: "Category not found." });
-        }
+        await Category.findByIdAndDelete(categoryID);
         res.json({ success: true, message: "Category deleted successfully." });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });

@@ -3,13 +3,25 @@ const asyncHandler = require('express-async-handler');
 const router = express.Router();
 const Coupon = require('../model/couponCode'); 
 const Product = require('../model/product');
+const { verifyAdmin } = require('../middleware/auth');
 
-// Get all coupons
+// Get all coupons - FILTER BY ADMIN
 router.get('/', asyncHandler(async (req, res) => {
     try {
-        const coupons = await Coupon.find().populate('applicableCategory', 'id name')
+        const { adminId } = req.query;
+        
+        let filter = {};
+        if (adminId) {
+            filter.createdBy = adminId;
+        }
+
+        const coupons = await Coupon.find(filter)
+            .populate('applicableCategory', 'id name')
             .populate('applicableSubCategory', 'id name')
-            .populate('applicableProduct', 'id name');
+            .populate('applicableProduct', 'id name')
+            .populate('createdBy', 'username name')
+            .sort({ _id: -1 });
+        
         res.json({ success: true, message: "Coupons retrieved successfully.", data: coupons });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
@@ -23,7 +35,9 @@ router.get('/:id', asyncHandler(async (req, res) => {
         const coupon = await Coupon.findById(couponID)
             .populate('applicableCategory', 'id name')
             .populate('applicableSubCategory', 'id name')
-            .populate('applicableProduct', 'id name');
+            .populate('applicableProduct', 'id name')
+            .populate('createdBy', 'username name');
+            
         if (!coupon) {
             return res.status(404).json({ success: false, message: "Coupon not found." });
         }
@@ -33,14 +47,13 @@ router.get('/:id', asyncHandler(async (req, res) => {
     }
 }));
 
-// Create a new coupon
-router.post('/', asyncHandler(async (req, res) => {
-    const { couponCode, discountType, discountAmount, minimumPurchaseAmount, endDate, status, applicableCategory, applicableSubCategory, applicableProduct } = req.body;
+// Create a new coupon - SIMPLE ADMIN CHECK
+router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
+    const { couponCode, discountType, discountAmount, minimumPurchaseAmount, endDate, status, applicableCategory, applicableSubCategory, applicableProduct, adminId } = req.body;
+    
     if (!couponCode || !discountType || !discountAmount || !endDate || !status) {
         return res.status(400).json({ success: false, message: "Code, discountType, discountAmount, endDate, and status are required." });
     }
-
-
 
     try {
         const coupon = new Coupon({
@@ -52,25 +65,36 @@ router.post('/', asyncHandler(async (req, res) => {
             status,
             applicableCategory,
             applicableSubCategory,
-            applicableProduct
+            applicableProduct,
+            createdBy: adminId
         });
 
         const newCoupon = await coupon.save();
-        res.json({ success: true, message: "Coupon created successfully.", data: null });
+        res.json({ success: true, message: "Coupon created successfully.", data: newCoupon });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
 }));
 
-
-// Update a coupon
-router.put('/:id', asyncHandler(async (req, res) => {
+// Update a coupon - SIMPLE OWNERSHIP CHECK
+router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
     try {
         const couponID = req.params.id;
-        const { couponCode, discountType, discountAmount, minimumPurchaseAmount, endDate, status, applicableCategory, applicableSubCategory, applicableProduct } = req.body;
-        console.log(req.body)
+        const { couponCode, discountType, discountAmount, minimumPurchaseAmount, endDate, status, applicableCategory, applicableSubCategory, applicableProduct, adminId } = req.body;
+        
         if (!couponCode || !discountType || !discountAmount || !endDate || !status) {
             return res.status(400).json({ success: false, message: "CouponCode, discountType, discountAmount, endDate, and status are required." });
+        }
+
+        // Find coupon and check ownership
+        const coupon = await Coupon.findById(couponID);
+        if (!coupon) {
+            return res.status(404).json({ success: false, message: "Coupon not found." });
+        }
+
+        // Super admin can edit anything, regular admins only their own
+        if (req.admin.clearanceLevel !== 'super_admin' && coupon.createdBy.toString() !== adminId) {
+            return res.status(403).json({ success: false, message: "You can only edit your own coupons." });
         }
 
         const updatedCoupon = await Coupon.findByIdAndUpdate(
@@ -79,71 +103,67 @@ router.put('/:id', asyncHandler(async (req, res) => {
             { new: true }
         );
 
-        if (!updatedCoupon) {
-            return res.status(404).json({ success: false, message: "Coupon not found." });
-        }
-
-        res.json({ success: true, message: "Coupon updated successfully.", data: null });
+        res.json({ success: true, message: "Coupon updated successfully.", data: updatedCoupon });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
 }));
 
-
-// Delete a coupon
-router.delete('/:id', asyncHandler(async (req, res) => {
+// Delete a coupon - SIMPLE OWNERSHIP CHECK
+router.delete('/:id', verifyAdmin, asyncHandler(async (req, res) => {
     try {
         const couponID = req.params.id;
-        const deletedCoupon = await Coupon.findByIdAndDelete(couponID);
-        if (!deletedCoupon) {
+        const { adminId } = req.body;
+        
+        // Find coupon and check ownership
+        const coupon = await Coupon.findById(couponID);
+        if (!coupon) {
             return res.status(404).json({ success: false, message: "Coupon not found." });
         }
+
+        // Super admin can delete anything, regular admins only their own
+        if (req.admin.clearanceLevel !== 'super_admin' && coupon.createdBy.toString() !== adminId) {
+            return res.status(403).json({ success: false, message: "You can only delete your own coupons." });
+        }
+
+        await Coupon.findByIdAndDelete(couponID);
         res.json({ success: true, message: "Coupon deleted successfully." });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
 }));
 
-
+// KEEP THIS ROUTE AS IS - NO CHANGES NEEDED (it's for customers)
 router.post('/check-coupon', asyncHandler(async (req, res) => {
     console.log(req.body);
-    const { couponCode, productIds,purchaseAmount } = req.body;
+    const { couponCode, productIds, purchaseAmount } = req.body;
 
     try {
-        // Find the coupon with the provided coupon code
         const coupon = await Coupon.findOne({ couponCode });
 
-
-        // If coupon is not found, return false
         if (!coupon) {
             return res.json({ success: false, message: "Coupon not found." });
         }
 
-        // Check if the coupon is expired
         const currentDate = new Date();
         if (coupon.endDate < currentDate) {
             return res.json({ success: false, message: "Coupon is expired." });
         }
 
-        // Check if the coupon is active
         if (coupon.status !== 'active') {
             return res.json({ success: false, message: "Coupon is inactive." });
         }
 
-       // Check if the purchase amount is greater than the minimum purchase amount specified in the coupon
-       if (coupon.minimumPurchaseAmount && purchaseAmount < coupon.minimumPurchaseAmount) {
-        return res.json({ success: false, message: "Minimum purchase amount not met." });
-    }
-
-        // Check if the coupon is applicable for all orders
-        if (!coupon.applicableCategory && !coupon.applicableSubCategory && !coupon.applicableProduct) {
-            return res.json({ success: true, message: "Coupon is applicable for all orders." ,data:coupon});
+        if (coupon.minimumPurchaseAmount && purchaseAmount < coupon.minimumPurchaseAmount) {
+            return res.json({ success: false, message: "Minimum purchase amount not met." });
         }
 
-        // Fetch the products from the database using the provided product IDs
+        if (!coupon.applicableCategory && !coupon.applicableSubCategory && !coupon.applicableProduct) {
+            return res.json({ success: true, message: "Coupon is applicable for all orders.", data: coupon });
+        }
+
         const products = await Product.find({ _id: { $in: productIds } });
 
-        // Check if any product in the list is not applicable for the coupon
         const isValid = products.every(product => {
             if (coupon.applicableCategory && coupon.applicableCategory.toString() !== product.proCategoryId.toString()) {
                 return false;
@@ -158,7 +178,7 @@ router.post('/check-coupon', asyncHandler(async (req, res) => {
         });
 
         if (isValid) {
-            return res.json({ success: true, message: "Coupon is applicable for the provided products." ,data:coupon});
+            return res.json({ success: true, message: "Coupon is applicable for the provided products.", data: coupon });
         } else {
             return res.json({ success: false, message: "Coupon is not applicable for the provided products." });
         }
@@ -167,8 +187,5 @@ router.post('/check-coupon', asyncHandler(async (req, res) => {
         return res.status(500).json({ success: false, message: "Internal server error." });
     }
 }));
-
-
-
 
 module.exports = router;

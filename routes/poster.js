@@ -4,11 +4,22 @@ const Poster = require('../model/poster');
 const { uploadPosters } = require('../uploadFile');
 const multer = require('multer');
 const asyncHandler = require('express-async-handler');
+const { verifyAdmin } = require('../middleware/auth');
 
-// Get all posters
+// Get all posters - FILTER BY ADMIN
 router.get('/', asyncHandler(async (req, res) => {
     try {
-        const posters = await Poster.find({});
+        const { adminId } = req.query;
+        
+        let filter = {};
+        if (adminId) {
+            filter.createdBy = adminId;
+        }
+
+        const posters = await Poster.find(filter)
+            .populate('createdBy', 'username name')
+            .sort({ _id: -1 });
+        
         res.json({ success: true, message: "Posters retrieved successfully.", data: posters });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
@@ -19,7 +30,9 @@ router.get('/', asyncHandler(async (req, res) => {
 router.get('/:id', asyncHandler(async (req, res) => {
     try {
         const posterID = req.params.id;
-        const poster = await Poster.findById(posterID);
+        const poster = await Poster.findById(posterID)
+            .populate('createdBy', 'username name');
+            
         if (!poster) {
             return res.status(404).json({ success: false, message: "Poster not found." });
         }
@@ -29,25 +42,19 @@ router.get('/:id', asyncHandler(async (req, res) => {
     }
 }));
 
-// Create a new poster with Cloudinary
-router.post('/', asyncHandler(async (req, res) => {
+// Create a new poster - SIMPLE ADMIN CHECK
+router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
     try {
         uploadPosters.single('img')(req, res, async function (err) {
             if (err instanceof multer.MulterError) {
-                if (err.code === 'LIMIT_FILE_SIZE') {
-                    err.message = 'File size is too large. Maximum filesize is 5MB.';
-                }
-                console.log(`Add poster: ${err}`);
                 return res.json({ success: false, message: err.message });
             } else if (err) {
-                console.log(`Add poster: ${err}`);
                 return res.json({ success: false, message: err.message });
             }
-            const { posterName } = req.body;
+            const { posterName, adminId } = req.body;
             let imageUrl = '';
 
             if (req.file) {
-                // Cloudinary provides the URL directly in req.file.path
                 imageUrl = req.file.path;
             }
 
@@ -62,44 +69,36 @@ router.post('/', asyncHandler(async (req, res) => {
             try {
                 const newPoster = new Poster({
                     posterName: posterName,
-                    imageUrl: imageUrl
+                    imageUrl: imageUrl,
+                    createdBy: adminId
                 });
                 await newPoster.save();
-                res.json({ success: true, message: "Poster created successfully.", data: null });
+                res.json({ success: true, message: "Poster created successfully.", data: newPoster });
             } catch (error) {
-                console.error("Error creating Poster:", error);
                 res.status(500).json({ success: false, message: error.message });
             }
-
         });
-
     } catch (err) {
-        console.log(`Error creating Poster: ${err.message}`);
         return res.status(500).json({ success: false, message: err.message });
     }
 }));
 
-// Update a poster with Cloudinary
-router.put('/:id', asyncHandler(async (req, res) => {
+// Update a poster - SIMPLE OWNERSHIP CHECK
+router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
     try {
         const posterID = req.params.id;
         uploadPosters.single('img')(req, res, async function (err) {
             if (err instanceof multer.MulterError) {
-                if (err.code === 'LIMIT_FILE_SIZE') {
-                    err.message = 'File size is too large. Maximum filesize is 5MB.';
-                }
-                console.log(`Update poster: ${err.message}`);
                 return res.json({ success: false, message: err.message });
             } else if (err) {
-                console.log(`Update poster: ${err.message}`);
                 return res.json({ success: false, message: err.message });
             }
 
-            const { posterName } = req.body;
+            const { posterName, adminId } = req.body;
             let image = req.body.image;
 
             if (req.file) {
-                image = req.file.path; // Cloudinary URL
+                image = req.file.path;
             }
 
             if (!posterName || !image) {
@@ -107,31 +106,51 @@ router.put('/:id', asyncHandler(async (req, res) => {
             }
 
             try {
-                const updatedPoster = await Poster.findByIdAndUpdate(posterID, { posterName: posterName, imageUrl: image }, { new: true });
-                if (!updatedPoster) {
+                // Find poster and check ownership
+                const poster = await Poster.findById(posterID);
+                if (!poster) {
                     return res.status(404).json({ success: false, message: "Poster not found." });
                 }
-                res.json({ success: true, message: "Poster updated successfully.", data: null });
+
+                // Super admin can edit anything, regular admins only their own
+                if (req.admin.clearanceLevel !== 'super_admin' && poster.createdBy.toString() !== adminId) {
+                    return res.status(403).json({ success: false, message: "You can only edit your own posters." });
+                }
+
+                const updatedPoster = await Poster.findByIdAndUpdate(
+                    posterID, 
+                    { posterName: posterName, imageUrl: image }, 
+                    { new: true }
+                );
+                
+                res.json({ success: true, message: "Poster updated successfully.", data: updatedPoster });
             } catch (error) {
                 res.status(500).json({ success: false, message: error.message });
             }
-
         });
-
     } catch (err) {
-        console.log(`Error updating poster: ${err.message}`);
         return res.status(500).json({ success: false, message: err.message });
     }
 }));
 
-// Delete a poster
-router.delete('/:id', asyncHandler(async (req, res) => {
+// Delete a poster - SIMPLE OWNERSHIP CHECK
+router.delete('/:id', verifyAdmin, asyncHandler(async (req, res) => {
     const posterID = req.params.id;
+    const { adminId } = req.body;
+    
     try {
-        const deletedPoster = await Poster.findByIdAndDelete(posterID);
-        if (!deletedPoster) {
+        // Find poster and check ownership
+        const poster = await Poster.findById(posterID);
+        if (!poster) {
             return res.status(404).json({ success: false, message: "Poster not found." });
         }
+
+        // Super admin can delete anything, regular admins only their own
+        if (req.admin.clearanceLevel !== 'super_admin' && poster.createdBy.toString() !== adminId) {
+            return res.status(403).json({ success: false, message: "You can only delete your own posters." });
+        }
+
+        await Poster.findByIdAndDelete(posterID);
         res.json({ success: true, message: "Poster deleted successfully." });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });

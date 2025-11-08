@@ -1,20 +1,18 @@
-const mongoose = require('mongoose');
-
-// Define the Brand schema
 const brandSchema = new mongoose.Schema({
     name: {
         type: String,
-        required: [true, 'Name is required'], // Adding custom error message
+        required: [true, 'Name is required'],
         trim: true
     },
     subcategoryId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'SubCategory', // This should match the model name you use when you create the SubCategory model
+        ref: 'SubCategory',
         required: [true, 'Subcategory ID is required']
+    },
+    // ADD THIS:
+    createdBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'AdminUser',
+        required: true
     }
 },{ timestamps: true });
-
-// Create the Brand model
-const Brand = mongoose.model('Brand', brandSchema);
-
-module.exports = Brand;

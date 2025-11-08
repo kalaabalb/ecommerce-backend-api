@@ -1,4 +1,3 @@
-
 const express = require('express');
 const asyncHandler = require('express-async-handler');
 const router = express.Router();
@@ -11,54 +10,26 @@ const VariantType = require('../model/variantType');
 const Variant = require('../model/variant');
 const Coupon = require('../model/couponCode');
 const Poster = require('../model/poster');
-
-// Middleware to check if user is super admin
-const requireSuperAdmin = asyncHandler(async (req, res, next) => {
-  // This would typically check JWT token or session
-  // For now, we'll assume super admin check is done via query param or header
-  const { clearanceLevel } = req.body;
-  
-  if (clearanceLevel !== 'super_admin') {
-    return res.status(403).json({ 
-      success: false, 
-      message: "Access denied. Super admin privileges required." 
-    });
-  }
-  next();
-});
+const { verifyAdmin } = require('../middleware/auth');
 
 // Admin login
 router.post('/login', asyncHandler(async (req, res) => {
   const { username, password } = req.body;
 
   if (!username || !password) {
-    return res.status(400).json({ 
-      success: false, 
-      message: "Username and password are required." 
-    });
+    return res.status(400).json({ success: false, message: "Username and password are required." });
   }
 
   try {
-    // Find admin user
-    const adminUser = await AdminUser.findOne({ 
-      username,
-      isActive: true 
-    });
+    const adminUser = await AdminUser.findOne({ username, isActive: true });
 
     if (!adminUser) {
-      return res.status(401).json({ 
-        success: false, 
-        message: "Invalid username or password." 
-      });
+      return res.status(401).json({ success: false, message: "Invalid username or password." });
     }
 
-    // In a real app, you'd use bcrypt for password hashing
-    // For now, we'll do plain text comparison (NOT RECOMMENDED FOR PRODUCTION)
+    // Plain text comparison (NOT RECOMMENDED FOR PRODUCTION)
     if (adminUser.password !== password) {
-      return res.status(401).json({ 
-        success: false, 
-        message: "Invalid username or password." 
-      });
+      return res.status(401).json({ success: false, message: "Invalid username or password." });
     }
 
     // Return user data (excluding password)
@@ -73,85 +44,64 @@ router.post('/login', asyncHandler(async (req, res) => {
       updatedAt: adminUser.updatedAt
     };
 
-    res.json({ 
-      success: true, 
-      message: "Login successful.", 
-      data: userResponse 
-    });
-
+    res.json({ success: true, message: "Login successful.", data: userResponse });
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 }));
 
 // Get all admin users (super admin only)
-router.get('/', asyncHandler(async (req, res) => {
+router.get('/', verifyAdmin, asyncHandler(async (req, res) => {
   try {
+    // Only super admin can see all admin users
+    if (req.admin.clearanceLevel !== 'super_admin') {
+      return res.status(403).json({ success: false, message: "Super admin privileges required." });
+    }
+
     const adminUsers = await AdminUser.find({ isActive: true })
       .select('-password')
       .populate('createdBy', 'name username')
       .sort({ createdAt: -1 });
 
-    res.json({ 
-      success: true, 
-      message: "Admin users retrieved successfully.", 
-      data: adminUsers 
-    });
+    res.json({ success: true, message: "Admin users retrieved successfully.", data: adminUsers });
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 }));
 
 // Get admin user by ID
-router.get('/:id', asyncHandler(async (req, res) => {
+router.get('/:id', verifyAdmin, asyncHandler(async (req, res) => {
   try {
     const adminUser = await AdminUser.findById(req.params.id)
       .select('-password')
       .populate('createdBy', 'name username');
 
     if (!adminUser) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Admin user not found." 
-      });
+      return res.status(404).json({ success: false, message: "Admin user not found." });
     }
 
-    res.json({ 
-      success: true, 
-      message: "Admin user retrieved successfully.", 
-      data: adminUser 
-    });
+    res.json({ success: true, message: "Admin user retrieved successfully.", data: adminUser });
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 }));
 
 // Create new admin user (super admin only)
-router.post('/', asyncHandler(async (req, res) => {
-  const { username, name, email, password, clearanceLevel, createdBy } = req.body;
+router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
+  // Only super admin can create new admin users
+  if (req.admin.clearanceLevel !== 'super_admin') {
+    return res.status(403).json({ success: false, message: "Super admin privileges required." });
+  }
+
+  const { username, name, email, password, clearanceLevel } = req.body;
 
   if (!username || !name || !email || !password) {
-    return res.status(400).json({ 
-      success: false, 
-      message: "Username, name, email, and password are required." 
-    });
+    return res.status(400).json({ success: false, message: "Username, name, email, and password are required." });
   }
 
   if (password.length < 6) {
-    return res.status(400).json({ 
-      success: false, 
-      message: "Password must be at least 6 characters long." 
-    });
+    return res.status(400).json({ success: false, message: "Password must be at least 6 characters long." });
   }
 
   try {
@@ -161,10 +111,7 @@ router.post('/', asyncHandler(async (req, res) => {
     });
 
     if (existingUser) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Username or email already exists." 
-      });
+      return res.status(400).json({ success: false, message: "Username or email already exists." });
     }
 
     const adminUser = new AdminUser({
@@ -173,7 +120,7 @@ router.post('/', asyncHandler(async (req, res) => {
       email,
       password, // In production, hash this password!
       clearanceLevel: clearanceLevel || 'admin',
-      createdBy: createdBy || null
+      createdBy: req.admin._id
     });
 
     await adminUser.save();
@@ -190,35 +137,34 @@ router.post('/', asyncHandler(async (req, res) => {
       updatedAt: adminUser.updatedAt
     };
 
-    res.json({ 
-      success: true, 
-      message: "Admin user created successfully.", 
-      data: userResponse 
-    });
+    res.json({ success: true, message: "Admin user created successfully.", data: userResponse });
   } catch (error) {
     if (error.code === 11000) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Username or email already exists." 
-      });
+      return res.status(400).json({ success: false, message: "Username or email already exists." });
     }
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 }));
 
 // Update admin user
-router.put('/:id', asyncHandler(async (req, res) => {
+router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
   const { name, email, clearanceLevel, isActive } = req.body;
 
   try {
+    // Only super admin can update other admin users
+    if (req.admin.clearanceLevel !== 'super_admin' && req.params.id !== req.admin._id.toString()) {
+      return res.status(403).json({ success: false, message: "You can only update your own profile." });
+    }
+
     const updateData = {};
     if (name) updateData.name = name;
     if (email) updateData.email = email;
-    if (clearanceLevel) updateData.clearanceLevel = clearanceLevel;
-    if (typeof isActive === 'boolean') updateData.isActive = isActive;
+    if (clearanceLevel && req.admin.clearanceLevel === 'super_admin') {
+      updateData.clearanceLevel = clearanceLevel;
+    }
+    if (typeof isActive === 'boolean' && req.admin.clearanceLevel === 'super_admin') {
+      updateData.isActive = isActive;
+    }
 
     const adminUser = await AdminUser.findByIdAndUpdate(
       req.params.id,
@@ -227,41 +173,30 @@ router.put('/:id', asyncHandler(async (req, res) => {
     ).select('-password');
 
     if (!adminUser) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Admin user not found." 
-      });
+      return res.status(404).json({ success: false, message: "Admin user not found." });
     }
 
-    res.json({ 
-      success: true, 
-      message: "Admin user updated successfully.", 
-      data: adminUser 
-    });
+    res.json({ success: true, message: "Admin user updated successfully.", data: adminUser });
   } catch (error) {
     if (error.code === 11000) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Email already exists." 
-      });
+      return res.status(400).json({ success: false, message: "Email already exists." });
     }
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 }));
 
 // Delete admin user and all their data (super admin only)
-router.delete('/:id', asyncHandler(async (req, res) => {
+router.delete('/:id', verifyAdmin, asyncHandler(async (req, res) => {
   try {
+    // Only super admin can delete admin users
+    if (req.admin.clearanceLevel !== 'super_admin') {
+      return res.status(403).json({ success: false, message: "Super admin privileges required." });
+    }
+
     const adminUser = await AdminUser.findById(req.params.id);
 
     if (!adminUser) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Admin user not found." 
-      });
+      return res.status(404).json({ success: false, message: "Admin user not found." });
     }
 
     const userId = adminUser._id;
@@ -281,21 +216,20 @@ router.delete('/:id', asyncHandler(async (req, res) => {
     // Delete the admin user
     await AdminUser.findByIdAndDelete(userId);
 
-    res.json({ 
-      success: true, 
-      message: "Admin user and all associated data deleted successfully." 
-    });
+    res.json({ success: true, message: "Admin user and all associated data deleted successfully." });
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 }));
 
-// Deactivate admin user (soft delete)
-router.put('/:id/deactivate', asyncHandler(async (req, res) => {
+// Deactivate admin user (soft delete) - super admin only
+router.put('/:id/deactivate', verifyAdmin, asyncHandler(async (req, res) => {
   try {
+    // Only super admin can deactivate admin users
+    if (req.admin.clearanceLevel !== 'super_admin') {
+      return res.status(403).json({ success: false, message: "Super admin privileges required." });
+    }
+
     const adminUser = await AdminUser.findByIdAndUpdate(
       req.params.id,
       { isActive: false },
@@ -303,22 +237,12 @@ router.put('/:id/deactivate', asyncHandler(async (req, res) => {
     ).select('-password');
 
     if (!adminUser) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Admin user not found." 
-      });
+      return res.status(404).json({ success: false, message: "Admin user not found." });
     }
 
-    res.json({ 
-      success: true, 
-      message: "Admin user deactivated successfully.", 
-      data: adminUser 
-    });
+    res.json({ success: true, message: "Admin user deactivated successfully.", data: adminUser });
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 }));
 
