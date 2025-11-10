@@ -10,9 +10,9 @@ const VariantType = require('../model/variantType');
 const Variant = require('../model/variant');
 const Coupon = require('../model/couponCode');
 const Poster = require('../model/poster');
-const { verifyAdmin } = require('../middleware/auth');
+const { verifyAdmin, verifySuperAdmin, generateToken } = require('../middleware/auth');
 
-// Admin login
+// Admin login - UPDATED WITH JWT
 router.post('/login', asyncHandler(async (req, res) => {
   const { username, password } = req.body;
 
@@ -32,6 +32,9 @@ router.post('/login', asyncHandler(async (req, res) => {
       return res.status(401).json({ success: false, message: "Invalid username or password." });
     }
 
+    // Generate JWT token
+    const token = generateToken(adminUser._id);
+
     // Return user data (excluding password)
     const userResponse = {
       _id: adminUser._id,
@@ -44,21 +47,36 @@ router.post('/login', asyncHandler(async (req, res) => {
       updatedAt: adminUser.updatedAt
     };
 
-    res.json({ success: true, message: "Login successful.", data: userResponse });
+    res.json({ 
+      success: true, 
+      message: "Login successful.", 
+      data: {
+        user: userResponse,
+        token: token
+      }
+    });
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 }));
 
-// Get all admin users (super admin only)
-router.get('/', verifyAdmin, asyncHandler(async (req, res) => {
+// Get current admin profile
+router.get('/profile', verifyAdmin, asyncHandler(async (req, res) => {
   try {
-    // Only super admin can see all admin users
-    if (req.admin.clearanceLevel !== 'super_admin') {
-      return res.status(403).json({ success: false, message: "Super admin privileges required." });
-    }
+    res.json({ 
+      success: true, 
+      message: "Profile retrieved successfully.", 
+      data: req.admin 
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+}));
 
+// Get all admin users (super admin only) - UPDATED MIDDLEWARE
+router.get('/', verifySuperAdmin, asyncHandler(async (req, res) => {
+  try {
     const adminUsers = await AdminUser.find({ isActive: true })
       .select('-password')
       .populate('createdBy', 'name username')
@@ -70,9 +88,14 @@ router.get('/', verifyAdmin, asyncHandler(async (req, res) => {
   }
 }));
 
-// Get admin user by ID
+// Get admin user by ID - UPDATED MIDDLEWARE
 router.get('/:id', verifyAdmin, asyncHandler(async (req, res) => {
   try {
+    // Regular admins can only view their own profile, super admins can view any
+    if (req.admin.clearanceLevel !== 'super_admin' && req.params.id !== req.admin._id.toString()) {
+      return res.status(403).json({ success: false, message: "You can only view your own profile." });
+    }
+
     const adminUser = await AdminUser.findById(req.params.id)
       .select('-password')
       .populate('createdBy', 'name username');
@@ -87,13 +110,8 @@ router.get('/:id', verifyAdmin, asyncHandler(async (req, res) => {
   }
 }));
 
-// Create new admin user (super admin only)
-router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
-  // Only super admin can create new admin users
-  if (req.admin.clearanceLevel !== 'super_admin') {
-    return res.status(403).json({ success: false, message: "Super admin privileges required." });
-  }
-
+// Create new admin user (super admin only) - UPDATED MIDDLEWARE
+router.post('/', verifySuperAdmin, asyncHandler(async (req, res) => {
   const { username, name, email, password, clearanceLevel } = req.body;
 
   if (!username || !name || !email || !password) {
@@ -118,7 +136,7 @@ router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
       username,
       name,
       email,
-      password, // Will be automatically hashed by the model pre-save hook
+      password,
       clearanceLevel: clearanceLevel || 'admin',
       createdBy: req.admin._id
     });
@@ -146,7 +164,7 @@ router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
   }
 }));
 
-// Update admin user
+// Update admin user - UPDATED PERMISSION LOGIC
 router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
   const { name, email, clearanceLevel, isActive, password } = req.body;
 
@@ -159,12 +177,12 @@ router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
     const updateData = {};
     if (name) updateData.name = name;
     if (email) updateData.email = email;
-    if (password) updateData.password = password; // Will be hashed automatically
-    if (clearanceLevel && req.admin.clearanceLevel === 'super_admin') {
-      updateData.clearanceLevel = clearanceLevel;
-    }
-    if (typeof isActive === 'boolean' && req.admin.clearanceLevel === 'super_admin') {
-      updateData.isActive = isActive;
+    if (password) updateData.password = password;
+    
+    // Only super admin can change clearance level and active status
+    if (req.admin.clearanceLevel === 'super_admin') {
+      if (clearanceLevel) updateData.clearanceLevel = clearanceLevel;
+      if (typeof isActive === 'boolean') updateData.isActive = isActive;
     }
 
     const adminUser = await AdminUser.findByIdAndUpdate(
@@ -186,18 +204,18 @@ router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
   }
 }));
 
-// Delete admin user and all their data (super admin only)
-router.delete('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+// Delete admin user and all their data (super admin only) - UPDATED MIDDLEWARE
+router.delete('/:id', verifySuperAdmin, asyncHandler(async (req, res) => {
   try {
-    // Only super admin can delete admin users
-    if (req.admin.clearanceLevel !== 'super_admin') {
-      return res.status(403).json({ success: false, message: "Super admin privileges required." });
-    }
-
     const adminUser = await AdminUser.findById(req.params.id);
 
     if (!adminUser) {
       return res.status(404).json({ success: false, message: "Admin user not found." });
+    }
+
+    // Prevent self-deletion
+    if (adminUser._id.toString() === req.admin._id.toString()) {
+      return res.status(400).json({ success: false, message: "You cannot delete your own account." });
     }
 
     const userId = adminUser._id;
@@ -223,12 +241,12 @@ router.delete('/:id', verifyAdmin, asyncHandler(async (req, res) => {
   }
 }));
 
-// Deactivate admin user (soft delete) - super admin only
-router.put('/:id/deactivate', verifyAdmin, asyncHandler(async (req, res) => {
+// Deactivate admin user (soft delete) - super admin only - UPDATED MIDDLEWARE
+router.put('/:id/deactivate', verifySuperAdmin, asyncHandler(async (req, res) => {
   try {
-    // Only super admin can deactivate admin users
-    if (req.admin.clearanceLevel !== 'super_admin') {
-      return res.status(403).json({ success: false, message: "Super admin privileges required." });
+    // Prevent self-deactivation
+    if (req.params.id === req.admin._id.toString()) {
+      return res.status(400).json({ success: false, message: "You cannot deactivate your own account." });
     }
 
     const adminUser = await AdminUser.findByIdAndUpdate(

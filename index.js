@@ -5,6 +5,7 @@ const asyncHandler = require('express-async-handler');
 const dotenv = require('dotenv');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const bcrypt = require('bcryptjs');
 
 dotenv.config();
 
@@ -36,8 +37,9 @@ app.use(limiter);
 const allowedOrigins = process.env.NODE_ENV === 'production' 
   ? [
       'https://yonasmarketplace-backend.onrender.com',
-      'http://localhost:*',
-      '*' 
+      'https://your-frontend-domain.com', // Add your frontend domain
+      'http://localhost:3000',
+      'http://localhost:3001'
     ]
   : [
       'http://localhost:*',
@@ -96,7 +98,7 @@ const connectDB = async () => {
     const mongoUrl = process.env.MONGO_URL;
     
     if (!mongoUrl) {
-      console.error('MONGO_URL environment variable is missing');
+      console.error('❌ MONGO_URL environment variable is missing');
       return;
     }
     
@@ -105,9 +107,10 @@ const connectDB = async () => {
       socketTimeoutMS: 45000,
       maxPoolSize: 10,
     });
-    console.log('Connected to MongoDB Atlas');
+    console.log('✅ Connected to MongoDB Atlas');
   } catch (error) {
-    console.error('Database connection failed:', error.message);
+    console.error('❌ Database connection failed:', error.message);
+    process.exit(1);
   }
 };
 
@@ -115,18 +118,18 @@ connectDB();
 
 const db = mongoose.connection;
 db.on('error', (error) => {
-  console.error('MongoDB connection error:', error);
+  console.error('❌ MongoDB connection error:', error);
 });
 db.on('disconnected', () => {
-  console.log('MongoDB disconnected');
+  console.log('⚠️ MongoDB disconnected');
 });
 db.on('reconnected', () => {
-  console.log('MongoDB reconnected');
+  console.log('✅ MongoDB reconnected');
 });
 
 // Request logging middleware
 app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path} - ${req.ip}`);
   next();
 });
 
@@ -158,7 +161,8 @@ app.get('/health', asyncHandler(async (req, res) => {
       timestamp: new Date().toISOString(),
       database: dbStatus,
       environment: process.env.NODE_ENV || 'development',
-      platform: 'Render'
+      platform: 'Render',
+      version: '1.0.0'
     }
   });
 }));
@@ -171,38 +175,55 @@ app.get('/', asyncHandler(async (req, res) => {
     data: {
       version: '1.0.0',
       environment: process.env.NODE_ENV || 'development',
-      database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+      database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+      timestamp: new Date().toISOString()
     }
   });
 }));
 
-// Initialize super admin
+// Initialize super admin with secure password
 const initializeSuperAdmin = async () => {
   try {
     const AdminUser = require('./model/adminUser');
+    
+    // Check if super admin already exists
     const superAdminExists = await AdminUser.findOne({ 
       clearanceLevel: 'super_admin'
     });
     
     if (!superAdminExists) {
+      console.log('🔄 Creating initial super admin user...');
+      
+      // Generate secure password
+      const saltRounds = 12;
+      const hashedPassword = await bcrypt.hash('Admin123!@#', saltRounds);
+      
       const superAdmin = new AdminUser({
         username: 'superadmin',
-        password: 'admin123',
+        password: hashedPassword,
         name: 'Super Administrator',
-        email: 'superadmin@yourapp.com',
-        clearanceLevel: 'super_admin'
+        email: 'superadmin@yonasmarketplace.com',
+        clearanceLevel: 'super_admin',
+        isActive: true
       });
+      
       await superAdmin.save();
-      console.log('Super admin user created');
+      console.log('✅ Super admin user created successfully');
+      console.log('📧 Username: superadmin');
+      console.log('🔑 Password: Admin123!@#');
+      console.log('⚠️  IMPORTANT: Change this password immediately after first login!');
+    } else {
+      console.log('✅ Super admin user already exists');
     }
   } catch (error) {
-    console.error('Error initializing super admin:', error);
+    console.error('❌ Error initializing super admin:', error);
   }
 };
 
-db.once('open', () => {
-  console.log('Connected to Database');
-  initializeSuperAdmin();
+// Initialize data when database is connected
+db.once('open', async () => {
+  console.log('✅ Connected to Database');
+  await initializeSuperAdmin();
 });
 
 // 404 handler
@@ -221,6 +242,11 @@ app.use('*', (req, res) => {
       '/posters',
       '/users',
       '/orders',
+      '/payment',
+      '/notification',
+      '/verification',
+      '/ratings',
+      '/admin-users',
       '/health'
     ]
   });
@@ -228,7 +254,7 @@ app.use('*', (req, res) => {
 
 // Global error handler
 app.use((error, req, res, next) => {
-  console.error('Error:', error);
+  console.error('🔴 Error:', error);
   
   if (error.message === 'Not allowed by CORS') {
     return res.status(403).json({
@@ -261,6 +287,21 @@ app.use((error, req, res, next) => {
     });
   }
   
+  // JWT errors
+  if (error.name === 'JsonWebTokenError') {
+    return res.status(401).json({
+      success: false,
+      message: 'Invalid token'
+    });
+  }
+  
+  if (error.name === 'TokenExpiredError') {
+    return res.status(401).json({
+      success: false,
+      message: 'Token expired'
+    });
+  }
+  
   res.status(error.status || 500).json({
     success: false,
     message: error.message || 'Internal server error'
@@ -272,8 +313,10 @@ const PORT = process.env.PORT || 3000;
 
 if (!process.env.VERCEL) {
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on port ${PORT}`);
-    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`📍 Base URL: http://localhost:${PORT}`);
+    console.log(`❤️  Health check: http://localhost:${PORT}/health`);
   });
 }
 
