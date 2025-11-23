@@ -6,14 +6,33 @@ const { uploadProduct } = require('../uploadFile');
 const asyncHandler = require('express-async-handler');
 const { verifyAdmin } = require('../middleware/auth');
 
-// Get all products - FILTER BY ADMIN
+// Get all products - FILTER BY ADMIN with better error handling
 router.get('/', asyncHandler(async (req, res) => {
     try {
-        const { adminId } = req.query;
+        const { adminId, search, category, inStock } = req.query;
         
         let filter = {};
+        
+        // Filter by admin if provided
         if (adminId) {
             filter.createdBy = adminId;
+        }
+        
+        // Search filter
+        if (search) {
+            filter.name = { $regex: search, $options: 'i' };
+        }
+        
+        // Category filter
+        if (category) {
+            filter.proCategoryId = category;
+        }
+        
+        // Stock filter
+        if (inStock === 'true') {
+            filter.quantity = { $gt: 0 };
+        } else if (inStock === 'false') {
+            filter.quantity = { $lte: 0 };
         }
 
         const products = await Product.find(filter)
@@ -22,37 +41,72 @@ router.get('/', asyncHandler(async (req, res) => {
             .populate('proBrandId', 'id name')
             .populate('proVariantTypeId', 'id type')
             .populate('proVariantId', 'id name')
-            .populate('createdBy', 'username name')
+            .populate('createdBy', 'username name email')
             .sort({ _id: -1 });
-        res.json({ success: true, message: "Products retrieved successfully.", data: products });
+            
+        res.json({ 
+            success: true, 
+            message: "Products retrieved successfully.", 
+            data: products,
+            count: products.length
+        });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        console.error('Error fetching products:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: "Unable to load products. Please try again later." 
+        });
     }
 }));
 
-// Get a product by ID
+// Get a product by ID with better error handling
 router.get('/:id', asyncHandler(async (req, res) => {
     try {
         const productID = req.params.id;
+        
+        if (!productID) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Product ID is required." 
+            });
+        }
+
         const product = await Product.findById(productID)
             .populate('proCategoryId', 'id name')
             .populate('proSubCategoryId', 'id name')
             .populate('proBrandId', 'id name')
             .populate('proVariantTypeId', 'id name')
             .populate('proVariantId', 'id name')
-            .populate('createdBy', 'username name');
+            .populate('createdBy', 'username name email');
         
         if (!product) {
-            return res.status(404).json({ success: false, message: "Product not found." });
+            return res.status(404).json({ 
+                success: false, 
+                message: "Product not found. It may have been deleted." 
+            });
         }
         
-        res.json({ success: true, message: "Product retrieved successfully.", data: product });
+        res.json({ 
+            success: true, 
+            message: "Product details retrieved successfully.", 
+            data: product 
+        });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        console.error('Error fetching product:', error);
+        if (error.name === 'CastError') {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Invalid product ID format." 
+            });
+        }
+        res.status(500).json({ 
+            success: false, 
+            message: "Unable to load product details. Please try again." 
+        });
     }
 }));
 
-// Create new product - SIMPLE ADMIN CHECK
+// Create new product - Enhanced with better validation
 router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
     try {
         uploadProduct.fields([
@@ -63,16 +117,73 @@ router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
             { name: 'image5', maxCount: 1 }
         ])(req, res, async function (err) {
             if (err instanceof multer.MulterError) {
-                return res.status(400).json({ success: false, message: `File upload error: ${err.message}` });
+                return res.status(400).json({ 
+                    success: false, 
+                    message: `File upload error: ${err.message}. Please check file size and format.` 
+                });
             } else if (err) {
-                return res.status(500).json({ success: false, message: `Upload failed: ${err.message}` });
+                return res.status(500).json({ 
+                    success: false, 
+                    message: `Upload failed: ${err.message}` 
+                });
             }
 
             try {
-                const { name, description, quantity, price, offerPrice, proCategoryId, proSubCategoryId, proBrandId, proVariantTypeId, proVariantId, adminId } = req.body;
+                const { 
+                    name, 
+                    description, 
+                    quantity, 
+                    price, 
+                    offerPrice, 
+                    proCategoryId, 
+                    proSubCategoryId, 
+                    proBrandId, 
+                    proVariantTypeId, 
+                    proVariantId, 
+                    adminId 
+                } = req.body;
 
-                if (!name || !quantity || !price || !proCategoryId || !proSubCategoryId) {
-                    return res.status(400).json({ success: false, message: "Name, quantity, price, category, and subcategory are required." });
+                // Enhanced validation
+                if (!name || !name.trim()) {
+                    return res.status(400).json({ 
+                        success: false, 
+                        message: "Product name is required." 
+                    });
+                }
+                
+                if (!quantity || quantity < 0) {
+                    return res.status(400).json({ 
+                        success: false, 
+                        message: "Valid quantity is required." 
+                    });
+                }
+                
+                if (!price || price < 0) {
+                    return res.status(400).json({ 
+                        success: false, 
+                        message: "Valid price is required." 
+                    });
+                }
+                
+                if (!proCategoryId) {
+                    return res.status(400).json({ 
+                        success: false, 
+                        message: "Product category is required." 
+                    });
+                }
+                
+                if (!proSubCategoryId) {
+                    return res.status(400).json({ 
+                        success: false, 
+                        message: "Product subcategory is required." 
+                    });
+                }
+                
+                if (!adminId) {
+                    return res.status(400).json({ 
+                        success: false, 
+                        message: "Admin ID is required." 
+                    });
                 }
 
                 // Process images
@@ -86,15 +197,22 @@ router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
                 });
 
                 if (imageUrls.length === 0) {
-                    return res.status(400).json({ success: false, message: "At least one product image is required." });
+                    return res.status(400).json({ 
+                        success: false, 
+                        message: "At least one product image is required." 
+                    });
                 }
                 
+                // Create new product
                 const newProduct = new Product({ 
-                    name, description, 
+                    name: name.trim(),
+                    description: description ? description.trim() : '',
                     quantity: parseInt(quantity),
                     price: parseFloat(price),
                     offerPrice: offerPrice ? parseFloat(offerPrice) : undefined,
-                    proCategoryId, proSubCategoryId, proBrandId,
+                    proCategoryId, 
+                    proSubCategoryId, 
+                    proBrandId,
                     proVariantTypeId, 
                     proVariantId: proVariantId ? (Array.isArray(proVariantId) ? proVariantId : [proVariantId]) : [],
                     createdBy: adminId,
@@ -102,20 +220,56 @@ router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
                 });
 
                 await newProduct.save();
-                res.json({ success: true, message: "Product created successfully.", data: newProduct });
+                
+                // Populate the created product for response
+                const populatedProduct = await Product.findById(newProduct._id)
+                    .populate('proCategoryId', 'id name')
+                    .populate('proSubCategoryId', 'id name')
+                    .populate('proBrandId', 'id name')
+                    .populate('createdBy', 'username name email');
+
+                res.status(201).json({ 
+                    success: true, 
+                    message: "Product created successfully!", 
+                    data: populatedProduct 
+                });
 
             } catch (dbError) {
-                res.status(500).json({ success: false, message: `Database error: ${dbError.message}` });
+                console.error('Database error creating product:', dbError);
+                if (dbError.name === 'ValidationError') {
+                    const errors = Object.values(dbError.errors).map(err => err.message);
+                    return res.status(400).json({ 
+                        success: false, 
+                        message: "Validation failed", 
+                        errors: errors 
+                    });
+                }
+                res.status(500).json({ 
+                    success: false, 
+                    message: "Failed to create product. Please try again." 
+                });
             }
         });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        console.error('Unexpected error in product creation:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: "An unexpected error occurred. Please try again." 
+        });
     }
 }));
 
-// Update a product - SIMPLE OWNERSHIP CHECK
+// Update a product - Enhanced with better ownership checks
 router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
     const productId = req.params.id;
+    
+    if (!productId) {
+        return res.status(400).json({ 
+            success: false, 
+            message: "Product ID is required." 
+        });
+    }
+
     try {
         uploadProduct.fields([
             { name: 'image1', maxCount: 1 },
@@ -125,36 +279,75 @@ router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
             { name: 'image5', maxCount: 1 }
         ])(req, res, async function (err) {
             if (err instanceof multer.MulterError) {
-                return res.status(400).json({ success: false, message: `File upload error: ${err.message}` });
+                return res.status(400).json({ 
+                    success: false, 
+                    message: `File upload error: ${err.message}` 
+                });
             } else if (err) {
-                return res.status(500).json({ success: false, message: `Upload failed: ${err.message}` });
+                return res.status(500).json({ 
+                    success: false, 
+                    message: `Upload failed: ${err.message}` 
+                });
             }
 
             try {
-                const { name, description, quantity, price, offerPrice, proCategoryId, proSubCategoryId, proBrandId, proVariantTypeId, proVariantId, adminId } = req.body;
+                const { 
+                    name, 
+                    description, 
+                    quantity, 
+                    price, 
+                    offerPrice, 
+                    proCategoryId, 
+                    proSubCategoryId, 
+                    proBrandId, 
+                    proVariantTypeId, 
+                    proVariantId, 
+                    adminId 
+                } = req.body;
 
                 // Find product and check ownership
                 const product = await Product.findById(productId);
                 if (!product) {
-                    return res.status(404).json({ success: false, message: "Product not found." });
+                    return res.status(404).json({ 
+                        success: false, 
+                        message: "Product not found." 
+                    });
+                }
+
+                // Enhanced ownership check
+                if (!adminId) {
+                    return res.status(400).json({ 
+                        success: false, 
+                        message: "Admin ID is required for this operation." 
+                    });
                 }
 
                 // Super admin can edit anything, regular admins only their own
-                if (req.admin.clearanceLevel !== 'super_admin' && product.createdBy.toString() !== adminId) {
-                    return res.status(403).json({ success: false, message: "You can only edit your own products." });
+                const isSuperAdmin = req.admin.clearanceLevel === 'super_admin';
+                const isOwner = product.createdBy.toString() === adminId;
+                
+                if (!isSuperAdmin && !isOwner) {
+                    return res.status(403).json({ 
+                        success: false, 
+                        message: "You can only edit your own products." 
+                    });
                 }
 
-                // Update fields
-                if (name) product.name = name;
-                if (description) product.description = description;
-                if (quantity) product.quantity = parseInt(quantity);
-                if (price) product.price = parseFloat(price);
-                if (offerPrice) product.offerPrice = parseFloat(offerPrice);
+                // Update fields with validation
+                if (name && name.trim()) product.name = name.trim();
+                if (description !== undefined) product.description = description.trim();
+                if (quantity !== undefined) product.quantity = parseInt(quantity);
+                if (price !== undefined) product.price = parseFloat(price);
+                if (offerPrice !== undefined) {
+                    product.offerPrice = offerPrice ? parseFloat(offerPrice) : null;
+                }
                 if (proCategoryId) product.proCategoryId = proCategoryId;
                 if (proSubCategoryId) product.proSubCategoryId = proSubCategoryId;
                 if (proBrandId) product.proBrandId = proBrandId;
                 if (proVariantTypeId) product.proVariantTypeId = proVariantTypeId;
-                if (proVariantId) product.proVariantId = Array.isArray(proVariantId) ? proVariantId : [proVariantId];
+                if (proVariantId) {
+                    product.proVariantId = Array.isArray(proVariantId) ? proVariantId : [proVariantId];
+                }
 
                 // Update images if new ones uploaded
                 const fields = ['image1', 'image2', 'image3', 'image4', 'image5'];
@@ -172,37 +365,103 @@ router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
                     }
                 });
 
+                // Validate before saving
+                await product.validate();
                 await product.save();
-                res.json({ success: true, message: "Product updated successfully.", data: product });
+                
+                // Populate the updated product for response
+                const updatedProduct = await Product.findById(productId)
+                    .populate('proCategoryId', 'id name')
+                    .populate('proSubCategoryId', 'id name')
+                    .populate('proBrandId', 'id name')
+                    .populate('createdBy', 'username name email');
+
+                res.json({ 
+                    success: true, 
+                    message: "Product updated successfully!", 
+                    data: updatedProduct 
+                });
             } catch (dbError) {
-                res.status(500).json({ success: false, message: `Database error: ${dbError.message}` });
+                console.error('Database error updating product:', dbError);
+                if (dbError.name === 'ValidationError') {
+                    const errors = Object.values(dbError.errors).map(err => err.message);
+                    return res.status(400).json({ 
+                        success: false, 
+                        message: "Validation failed", 
+                        errors: errors 
+                    });
+                }
+                res.status(500).json({ 
+                    success: false, 
+                    message: "Failed to update product. Please try again." 
+                });
             }
         });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        console.error('Unexpected error in product update:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: "An unexpected error occurred. Please try again." 
+        });
     }
 }));
 
-// Delete a product - SIMPLE OWNERSHIP CHECK
+// Delete a product - Enhanced with better error handling
 router.delete('/:id', verifyAdmin, asyncHandler(async (req, res) => {
     const productID = req.params.id;
     const { adminId } = req.body;
     
+    if (!productID) {
+        return res.status(400).json({ 
+            success: false, 
+            message: "Product ID is required." 
+        });
+    }
+    
+    if (!adminId) {
+        return res.status(400).json({ 
+            success: false, 
+            message: "Admin ID is required for this operation." 
+        });
+    }
+    
     try {
         const product = await Product.findById(productID);
         if (!product) {
-            return res.status(404).json({ success: false, message: "Product not found." });
+            return res.status(404).json({ 
+                success: false, 
+                message: "Product not found. It may have been already deleted." 
+            });
         }
 
-        // Super admin can delete anything, regular admins only their own
-        if (req.admin.clearanceLevel !== 'super_admin' && product.createdBy.toString() !== adminId) {
-            return res.status(403).json({ success: false, message: "You can only delete your own products." });
+        // Enhanced ownership check
+        const isSuperAdmin = req.admin.clearanceLevel === 'super_admin';
+        const isOwner = product.createdBy.toString() === adminId;
+        
+        if (!isSuperAdmin && !isOwner) {
+            return res.status(403).json({ 
+                success: false, 
+                message: "You can only delete your own products." 
+            });
         }
 
         await Product.findByIdAndDelete(productID);
-        res.json({ success: true, message: "Product deleted successfully." });
+        res.json({ 
+            success: true, 
+            message: "Product deleted successfully!" 
+        });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        console.error('Error deleting product:', error);
+        if (error.name === 'CastError') {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Invalid product ID format." 
+            });
+        }
+        res.status(500).json({ 
+            success: false, 
+            message: "Failed to delete product. Please try again." 
+        });
     }
 }));
 

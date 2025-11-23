@@ -46,7 +46,7 @@ const createFileFilter = (type) => {
   };
 };
 
-// Cloudinary storage configurations (keep the rest the same)
+// Cloudinary storage configurations
 const storageCategory = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
@@ -64,7 +64,7 @@ const storageCategory = new CloudinaryStorage({
 const uploadCategory = multer({
   storage: storageCategory,
   limits: {
-    fileSize: 1024 * 1024 * 5 // 5MB
+    fileSize: 1024 * 1024 * 15 // Increased to 15MB
   },
   fileFilter: createFileFilter('Category')
 });
@@ -87,7 +87,7 @@ const storageProduct = new CloudinaryStorage({
 const uploadProduct = multer({
   storage: storageProduct,
   limits: {
-    fileSize: 1024 * 1024 * 5 // 5MB
+    fileSize: 1024 * 1024 * 15 // Increased to 15MB
   },
   fileFilter: createFileFilter('Product')
 });
@@ -110,7 +110,7 @@ const storagePoster = new CloudinaryStorage({
 const uploadPosters = multer({
   storage: storagePoster,
   limits: {
-    fileSize: 1024 * 1024 * 5 // 5MB
+    fileSize: 1024 * 1024 * 15 // Increased to 15MB
   },
   fileFilter: createFileFilter('Poster')
 });
@@ -132,7 +132,7 @@ const storagePaymentProof = new CloudinaryStorage({
 const uploadPaymentProof = multer({
   storage: storagePaymentProof,
   limits: {
-    fileSize: 1024 * 1024 * 5 // 5MB
+    fileSize: 1024 * 1024 * 15 // Increased to 15MB
   },
   fileFilter: createFileFilter('Payment')
 });

@@ -3,33 +3,46 @@ const mongoose = require('mongoose');
 const productSchema = new mongoose.Schema({
     name: {
         type: String,
-        required: [true, 'Name is required'],
-        trim: true
+        required: [true, 'Product name is required'],
+        trim: true,
+        minlength: [2, 'Product name must be at least 2 characters long'],
+        maxlength: [100, 'Product name cannot exceed 100 characters']
     },
     description: {
         type: String,
-        trim: true
+        trim: true,
+        maxlength: [1000, 'Description cannot exceed 1000 characters']
     },
     quantity: {
         type: Number,
-        required: true
+        required: [true, 'Product quantity is required'],
+        min: [0, 'Quantity cannot be negative'],
+        default: 0
     },
     price: {
         type: Number,
-        required: true
+        required: [true, 'Product price is required'],
+        min: [0, 'Price cannot be negative']
     },
     offerPrice: {
-        type: Number
+        type: Number,
+        min: [0, 'Offer price cannot be negative'],
+        validate: {
+            validator: function(value) {
+                return value === null || value <= this.price;
+            },
+            message: 'Offer price cannot be higher than regular price'
+        }
     },
     proCategoryId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Category',
-        required: true
+        required: [true, 'Product category is required']
     },
     proSubCategoryId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'SubCategory',
-        required: true
+        required: [true, 'Product subcategory is required']
     },
     proBrandId: {
         type: mongoose.Schema.Types.ObjectId,
@@ -39,24 +52,70 @@ const productSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'VariantType'
     },
-    proVariantId: [String],
+    proVariantId: [{
+        type: String,
+        trim: true
+    }],
     images: [{
         image: {
             type: Number,
-            required: true
+            required: true,
+            min: 1,
+            max: 5
         },
         url: {
             type: String,
             required: true
         }
     }],
-    // MADE REQUIRED - track who created this product
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'AdminUser',
-        required: true // Changed to required
+        required: [true, 'Product creator is required']
+    },
+    isActive: {
+        type: Boolean,
+        default: true
     }
-}, { timestamps: true });
+}, { 
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }
+});
+
+// Virtual for checking if product is in stock
+productSchema.virtual('inStock').get(function() {
+    return this.quantity > 0;
+});
+
+// Virtual for checking if product has discount
+productSchema.virtual('hasDiscount').get(function() {
+    return this.offerPrice && this.offerPrice < this.price;
+});
+
+// Index for better search performance
+productSchema.index({ name: 'text', description: 'text' });
+productSchema.index({ proCategoryId: 1 });
+productSchema.index({ proSubCategoryId: 1 });
+productSchema.index({ createdBy: 1 });
+productSchema.index({ createdAt: -1 });
+
+// Middleware to validate category and subcategory relationship
+productSchema.pre('save', async function(next) {
+    if (this.isModified('proCategoryId') || this.isModified('proSubCategoryId')) {
+        try {
+            const SubCategory = mongoose.model('SubCategory');
+            const subCategory = await SubCategory.findById(this.proSubCategoryId);
+            
+            if (subCategory && subCategory.categoryId.toString() !== this.proCategoryId.toString()) {
+                return next(new Error('Subcategory does not belong to the selected category'));
+            }
+        } catch (error) {
+            return next(error);
+        }
+    }
+    next();
+});
 
 const Product = mongoose.model('Product', productSchema);
 module.exports = Product;
