@@ -9,7 +9,7 @@ const generateToken = (adminId) => {
   });
 };
 
-// Verify JWT token middleware
+// Add this temporary fix to see what's happening
 const verifyAdmin = asyncHandler(async (req, res, next) => {
   try {
     let token;
@@ -19,6 +19,7 @@ const verifyAdmin = asyncHandler(async (req, res, next) => {
     }
 
     if (!token) {
+      console.log('❌ [AUTH] No token provided');
       return res.status(401).json({
         success: false,
         message: "Not authorized, no token provided."
@@ -31,6 +32,7 @@ const verifyAdmin = asyncHandler(async (req, res, next) => {
       const adminUser = await AdminUser.findById(decoded.adminId).select('-password');
       
       if (!adminUser || !adminUser.isActive) {
+        console.log('❌ [AUTH] Admin user not found or inactive');
         return res.status(401).json({
           success: false,
           message: "Admin user not found or inactive."
@@ -38,14 +40,17 @@ const verifyAdmin = asyncHandler(async (req, res, next) => {
       }
 
       req.admin = adminUser;
+      console.log(`✅ [AUTH] Verified admin: ${adminUser.username} (${adminUser.clearanceLevel})`);
       next();
     } catch (error) {
+      console.log('❌ [AUTH] Token verification failed:', error.message);
       return res.status(401).json({
         success: false,
         message: "Not authorized, invalid token."
       });
     }
   } catch (error) {
+    console.log('❌ [AUTH] Admin verification failed:', error.message);
     res.status(500).json({
       success: false,
       message: "Admin verification failed."
