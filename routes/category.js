@@ -54,7 +54,7 @@ router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
                 return res.json({ success: false, message: err.message });
             }
             
-            const { name, adminId } = req.body;
+            const { name, adminId } = req.body; // Use adminId consistently
             let imageUrl = '';
 
             if (req.file) {
@@ -69,11 +69,15 @@ router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
                 return res.status(400).json({ success: false, message: "Image is required." });
             }
 
+            if (!adminId) {
+                return res.status(400).json({ success: false, message: "Admin ID is required." });
+            }
+
             try {
                 const newCategory = new Category({
                     name: name,
                     image: imageUrl,
-                    createdBy: adminId
+                    createdBy: adminId // Use adminId as createdBy
                 });
                 
                 await newCategory.save();
@@ -98,7 +102,7 @@ router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
                 return res.json({ success: false, message: err.message });
             }
 
-            const { name, adminId } = req.body;
+            const { name, adminId } = req.body; // Use adminId consistently
             let image = req.body.image;
 
             if (req.file) {
@@ -107,6 +111,10 @@ router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
 
             if (!name || !image) {
                 return res.status(400).json({ success: false, message: "Name and image are required." });
+            }
+
+            if (!adminId) {
+                return res.status(400).json({ success: false, message: "Admin ID is required." });
             }
 
             try {
@@ -142,6 +150,10 @@ router.delete('/:id', verifyAdmin, asyncHandler(async (req, res) => {
     try {
         const categoryID = req.params.id;
         const { adminId } = req.body;
+
+        if (!adminId) {
+            return res.status(400).json({ success: false, message: "Admin ID is required." });
+        }
 
         // Find category and check ownership
         const category = await Category.findById(categoryID);

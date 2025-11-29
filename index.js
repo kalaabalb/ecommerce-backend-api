@@ -11,10 +11,10 @@ dotenv.config();
 
 const app = express();
 
-// Rate limiting for IPv6
+// Rate limiting for IPv6 - INCREASED LIMITS
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'production' ? 100 : 5000,
+  max: process.env.NODE_ENV === 'production' ? 1000 : 10000, // Increased limits
   message: {
     success: false,
     message: 'Too many requests from this IP, please try again later.'
@@ -28,6 +28,17 @@ const limiter = rateLimit({
       return ips[0].trim();
     }
     return req.socket.remoteAddress;
+  },
+  skip: (req) => {
+    // Skip rate limiting for health checks and certain endpoints
+    if (req.url === '/health' || req.url === '/' || req.url.includes('/admin-users/login')) {
+      return true;
+    }
+    // Skip for specific IPs or in development
+    if (process.env.NODE_ENV !== 'production') {
+      return true;
+    }
+    return false;
   }
 });
 

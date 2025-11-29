@@ -215,7 +215,7 @@ router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
                     proBrandId,
                     proVariantTypeId, 
                     proVariantId: proVariantId ? (Array.isArray(proVariantId) ? proVariantId : [proVariantId]) : [],
-                    createdBy: adminId,
+                    createdBy: adminId, // Use adminId as createdBy
                     images: imageUrls 
                 });
 
