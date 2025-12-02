@@ -3,21 +3,12 @@ const router = express.Router();
 const Brand = require('../model/brand');
 const Product = require('../model/product');
 const asyncHandler = require('express-async-handler');
-const { verifyAdmin } = require('../middleware/auth');
 
-// Get all brands - FILTER BY ADMIN
+// Get all brands
 router.get('/', asyncHandler(async (req, res) => {
     try {
-        const { adminId } = req.query;
-        
-        let filter = {};
-        if (adminId) {
-            filter.createdBy = adminId;
-        }
-
-        const brands = await Brand.find(filter)
+        const brands = await Brand.find()
             .populate('subcategoryId')
-            .populate('createdBy', 'username name')
             .sort({ _id: -1 });
         
         res.json({ success: true, message: "Brands retrieved successfully.", data: brands });
@@ -31,8 +22,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
     try {
         const brandID = req.params.id;
         const brand = await Brand.findById(brandID)
-            .populate('subcategoryId')
-            .populate('createdBy', 'username name');
+            .populate('subcategoryId');
         
         if (!brand) {
             return res.status(404).json({ success: false, message: "Brand not found." });
@@ -43,16 +33,16 @@ router.get('/:id', asyncHandler(async (req, res) => {
     }
 }));
 
-// Create a new brand - SIMPLE ADMIN CHECK
-router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
-    const { name, subcategoryId, adminId } = req.body;
+// Create a new brand
+router.post('/', asyncHandler(async (req, res) => {
+    const { name, subcategoryId } = req.body;
     
     if (!name || !subcategoryId) {
         return res.status(400).json({ success: false, message: "Name and subcategory ID are required." });
     }
 
     try {
-        const brand = new Brand({ name, subcategoryId, createdBy: adminId });
+        const brand = new Brand({ name, subcategoryId });
         const newBrand = await brand.save();
         res.json({ success: true, message: "Brand created successfully.", data: newBrand });
     } catch (error) {
@@ -60,25 +50,19 @@ router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
     }
 }));
 
-// Update a brand - SIMPLE OWNERSHIP CHECK
-router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+// Update a brand
+router.put('/:id', asyncHandler(async (req, res) => {
     const brandID = req.params.id;
-    const { name, subcategoryId, adminId } = req.body;
+    const { name, subcategoryId } = req.body;
     
     if (!name || !subcategoryId) {
         return res.status(400).json({ success: false, message: "Name and subcategory ID are required." });
     }
 
     try {
-        // Find brand and check ownership
         const brand = await Brand.findById(brandID);
         if (!brand) {
             return res.status(404).json({ success: false, message: "Brand not found." });
-        }
-
-        // Super admin can edit anything, regular admins only their own
-        if (req.admin.clearanceLevel !== 'super_admin' && brand.createdBy.toString() !== adminId) {
-            return res.status(403).json({ success: false, message: "You can only edit your own brands." });
         }
 
         const updatedBrand = await Brand.findByIdAndUpdate(
@@ -93,21 +77,14 @@ router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
     }
 }));
 
-// Delete a brand - SIMPLE OWNERSHIP CHECK
-router.delete('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+// Delete a brand
+router.delete('/:id', asyncHandler(async (req, res) => {
     const brandID = req.params.id;
-    const { adminId } = req.body;
     
     try {
-        // Find brand and check ownership
         const brand = await Brand.findById(brandID);
         if (!brand) {
             return res.status(404).json({ success: false, message: "Brand not found." });
-        }
-
-        // Super admin can delete anything, regular admins only their own
-        if (req.admin.clearanceLevel !== 'super_admin' && brand.createdBy.toString() !== adminId) {
-            return res.status(403).json({ success: false, message: "You can only delete your own brands." });
         }
 
         // Check if any products reference this brand

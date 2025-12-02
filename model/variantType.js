@@ -10,11 +10,6 @@ const variantTypeSchema = new mongoose.Schema({
         type: String,
         required: [true, 'Type is required'],
         trim: true
-    },
-    createdBy: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'AdminUser',
-        required: true
     }
 },{ timestamps: true });
 

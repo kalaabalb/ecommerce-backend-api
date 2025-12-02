@@ -2,7 +2,7 @@ const express = require('express');
 const asyncHandler = require('express-async-handler');
 const router = express.Router();
 const Rating = require('../model/rating');
-const mongoose = require('mongoose'); // ADD THIS LINE
+const mongoose = require('mongoose');
 
 // Get ratings for a product with pagination
 router.get('/product/:productId', asyncHandler(async (req, res) => {
@@ -39,7 +39,7 @@ router.get('/product/:productId/stats', asyncHandler(async (req, res) => {
     const { productId } = req.params;
     
     const stats = await Rating.aggregate([
-      { $match: { productId: new mongoose.Types.ObjectId(productId) } }, // This line needs mongoose
+      { $match: { productId: new mongoose.Types.ObjectId(productId) } },
       {
         $group: {
           _id: '$productId',

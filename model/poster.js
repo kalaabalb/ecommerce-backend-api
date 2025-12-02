@@ -9,11 +9,6 @@ const posterSchema = new mongoose.Schema({
   imageUrl: {
     type: String,
     required: true
-  },
-  createdBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'AdminUser',
-    required: true
   }
 }, {
   timestamps: true 

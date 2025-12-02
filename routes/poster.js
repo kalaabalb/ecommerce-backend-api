@@ -4,21 +4,11 @@ const Poster = require('../model/poster');
 const { uploadPosters } = require('../uploadFile');
 const multer = require('multer');
 const asyncHandler = require('express-async-handler');
-const { verifyAdmin } = require('../middleware/auth');
 
-// Get all posters - FILTER BY ADMIN
+// Get all posters
 router.get('/', asyncHandler(async (req, res) => {
     try {
-        const { adminId } = req.query;
-        
-        let filter = {};
-        if (adminId) {
-            filter.createdBy = adminId;
-        }
-
-        const posters = await Poster.find(filter)
-            .populate('createdBy', 'username name')
-            .sort({ _id: -1 });
+        const posters = await Poster.find({}).sort({ _id: -1 });
         
         res.json({ success: true, message: "Posters retrieved successfully.", data: posters });
     } catch (error) {
@@ -30,8 +20,7 @@ router.get('/', asyncHandler(async (req, res) => {
 router.get('/:id', asyncHandler(async (req, res) => {
     try {
         const posterID = req.params.id;
-        const poster = await Poster.findById(posterID)
-            .populate('createdBy', 'username name');
+        const poster = await Poster.findById(posterID);
             
         if (!poster) {
             return res.status(404).json({ success: false, message: "Poster not found." });
@@ -42,8 +31,8 @@ router.get('/:id', asyncHandler(async (req, res) => {
     }
 }));
 
-// Create a new poster - SIMPLE ADMIN CHECK
-router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
+// Create a new poster
+router.post('/', asyncHandler(async (req, res) => {
     try {
         uploadPosters.single('img')(req, res, async function (err) {
             if (err instanceof multer.MulterError) {
@@ -51,7 +40,7 @@ router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
             } else if (err) {
                 return res.json({ success: false, message: err.message });
             }
-            const { posterName, adminId } = req.body;
+            const { posterName } = req.body;
             let imageUrl = '';
 
             if (req.file) {
@@ -69,8 +58,7 @@ router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
             try {
                 const newPoster = new Poster({
                     posterName: posterName,
-                    imageUrl: imageUrl,
-                    createdBy: adminId
+                    imageUrl: imageUrl
                 });
                 await newPoster.save();
                 res.json({ success: true, message: "Poster created successfully.", data: newPoster });
@@ -83,8 +71,8 @@ router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
     }
 }));
 
-// Update a poster - SIMPLE OWNERSHIP CHECK
-router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+// Update a poster
+router.put('/:id', asyncHandler(async (req, res) => {
     try {
         const posterID = req.params.id;
         uploadPosters.single('img')(req, res, async function (err) {
@@ -94,7 +82,7 @@ router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
                 return res.json({ success: false, message: err.message });
             }
 
-            const { posterName, adminId } = req.body;
+            const { posterName } = req.body;
             let image = req.body.image;
 
             if (req.file) {
@@ -106,15 +94,9 @@ router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
             }
 
             try {
-                // Find poster and check ownership
                 const poster = await Poster.findById(posterID);
                 if (!poster) {
                     return res.status(404).json({ success: false, message: "Poster not found." });
-                }
-
-                // Super admin can edit anything, regular admins only their own
-                if (req.admin.clearanceLevel !== 'super_admin' && poster.createdBy.toString() !== adminId) {
-                    return res.status(403).json({ success: false, message: "You can only edit your own posters." });
                 }
 
                 const updatedPoster = await Poster.findByIdAndUpdate(
@@ -133,21 +115,14 @@ router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
     }
 }));
 
-// Delete a poster - SIMPLE OWNERSHIP CHECK
-router.delete('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+// Delete a poster
+router.delete('/:id', asyncHandler(async (req, res) => {
     const posterID = req.params.id;
-    const { adminId } = req.body;
     
     try {
-        // Find poster and check ownership
         const poster = await Poster.findById(posterID);
         if (!poster) {
             return res.status(404).json({ success: false, message: "Poster not found." });
-        }
-
-        // Super admin can delete anything, regular admins only their own
-        if (req.admin.clearanceLevel !== 'super_admin' && poster.createdBy.toString() !== adminId) {
-            return res.status(403).json({ success: false, message: "You can only delete your own posters." });
         }
 
         await Poster.findByIdAndDelete(posterID);

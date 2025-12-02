@@ -3,21 +3,12 @@ const router = express.Router();
 const Variant = require('../model/variant');
 const Product = require('../model/product');
 const asyncHandler = require('express-async-handler');
-const { verifyAdmin } = require('../middleware/auth');
 
-// Get all variants - FILTER BY ADMIN
+// Get all variants
 router.get('/', asyncHandler(async (req, res) => {
     try {
-        const { adminId } = req.query;
-        
-        let filter = {};
-        if (adminId) {
-            filter.createdBy = adminId;
-        }
-
-        const variants = await Variant.find(filter)
+        const variants = await Variant.find()
             .populate('variantTypeId')
-            .populate('createdBy', 'username name')
             .sort({ _id: -1 });
         
         res.json({ success: true, message: "Variants retrieved successfully.", data: variants });
@@ -31,8 +22,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
     try {
         const variantID = req.params.id;
         const variant = await Variant.findById(variantID)
-            .populate('variantTypeId')
-            .populate('createdBy', 'username name');
+            .populate('variantTypeId');
             
         if (!variant) {
             return res.status(404).json({ success: false, message: "Variant not found." });
@@ -43,16 +33,16 @@ router.get('/:id', asyncHandler(async (req, res) => {
     }
 }));
 
-// Create a new variant - SIMPLE ADMIN CHECK
-router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
-    const { name, variantTypeId, adminId } = req.body;
+// Create a new variant
+router.post('/', asyncHandler(async (req, res) => {
+    const { name, variantTypeId } = req.body;
     
     if (!name || !variantTypeId) {
         return res.status(400).json({ success: false, message: "Name and VariantType ID are required." });
     }
 
     try {
-        const variant = new Variant({ name, variantTypeId, createdBy: adminId });
+        const variant = new Variant({ name, variantTypeId });
         const newVariant = await variant.save();
         res.json({ success: true, message: "Variant created successfully.", data: newVariant });
     } catch (error) {
@@ -60,25 +50,19 @@ router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
     }
 }));
 
-// Update a variant - SIMPLE OWNERSHIP CHECK
-router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+// Update a variant
+router.put('/:id', asyncHandler(async (req, res) => {
     const variantID = req.params.id;
-    const { name, variantTypeId, adminId } = req.body;
+    const { name, variantTypeId } = req.body;
     
     if (!name || !variantTypeId) {
         return res.status(400).json({ success: false, message: "Name and VariantType ID are required." });
     }
 
     try {
-        // Find variant and check ownership
         const variant = await Variant.findById(variantID);
         if (!variant) {
             return res.status(404).json({ success: false, message: "Variant not found." });
-        }
-
-        // Super admin can edit anything, regular admins only their own
-        if (req.admin.clearanceLevel !== 'super_admin' && variant.createdBy.toString() !== adminId) {
-            return res.status(403).json({ success: false, message: "You can only edit your own variants." });
         }
 
         const updatedVariant = await Variant.findByIdAndUpdate(
@@ -93,21 +77,14 @@ router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
     }
 }));
 
-// Delete a variant - SIMPLE OWNERSHIP CHECK
-router.delete('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+// Delete a variant
+router.delete('/:id', asyncHandler(async (req, res) => {
     const variantID = req.params.id;
-    const { adminId } = req.body;
     
     try {
-        // Find variant and check ownership
         const variant = await Variant.findById(variantID);
         if (!variant) {
             return res.status(404).json({ success: false, message: "Variant not found." });
-        }
-
-        // Super admin can delete anything, regular admins only their own
-        if (req.admin.clearanceLevel !== 'super_admin' && variant.createdBy.toString() !== adminId) {
-            return res.status(403).json({ success: false, message: "You can only delete your own variants." });
         }
 
         // Check if any products reference this variant

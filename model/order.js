@@ -36,11 +36,6 @@ const orderSchema = new mongoose.Schema({
       },
       variant: {
         type: String,
-      },
-      // SIMPLE OWNER TRACKING - just to know which admin owns this product
-      productOwner: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'AdminUser'
       }
     }
   ],
@@ -72,13 +67,8 @@ const orderSchema = new mongoose.Schema({
     verified: Boolean,
     verifiedAt: Date
   },
-  couponCode: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Coupon'
-  },
   orderTotal: {
     subtotal: Number,
-    discount: Number,
     total: Number
   },
   trackingUrl: {

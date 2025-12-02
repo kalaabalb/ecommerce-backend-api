@@ -5,7 +5,7 @@ const asyncHandler = require('express-async-handler');
 const dotenv = require('dotenv');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const bcrypt = require('bcryptjs');
+const path = require('path');
 
 dotenv.config();
 
@@ -14,7 +14,7 @@ const app = express();
 // Rate limiting for IPv6 - INCREASED LIMITS
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'production' ? 1000 : 10000, // Increased limits
+  max: process.env.NODE_ENV === 'production' ? 1000 : 10000,
   message: {
     success: false,
     message: 'Too many requests from this IP, please try again later.'
@@ -30,11 +30,9 @@ const limiter = rateLimit({
     return req.socket.remoteAddress;
   },
   skip: (req) => {
-    // Skip rate limiting for health checks and certain endpoints
-    if (req.url === '/health' || req.url === '/' || req.url.includes('/admin-users/login')) {
+    if (req.url === '/health' || req.url === '/' || req.url.includes('/users/login')) {
       return true;
     }
-    // Skip for specific IPs or in development
     if (process.env.NODE_ENV !== 'production') {
       return true;
     }
@@ -48,7 +46,6 @@ app.use(limiter);
 const allowedOrigins = process.env.NODE_ENV === 'production' 
   ? [
       'https://yonasmarketplace-backend.onrender.com',
-      'https://your-frontend-domain.com', // Add your frontend domain
       'http://localhost:3000',
       'http://localhost:3001'
     ]
@@ -151,7 +148,6 @@ app.use('/brands', require('./routes/brand'));
 app.use('/variantTypes', require('./routes/variantType'));
 app.use('/variants', require('./routes/variant'));
 app.use('/products', require('./routes/product'));
-app.use('/couponCodes', require('./routes/couponCode'));
 app.use('/posters', require('./routes/poster'));
 app.use('/users', require('./routes/user'));
 app.use('/orders', require('./routes/order'));
@@ -159,7 +155,6 @@ app.use('/payment', require('./routes/payment'));
 app.use('/notification', require('./routes/notification'));
 app.use('/verification', require('./routes/verification'));
 app.use('/ratings', require('./routes/rating'));
-app.use('/admin-users', require('./routes/adminUser'));
 
 // Health check route
 app.get('/health', asyncHandler(async (req, res) => {
@@ -192,49 +187,9 @@ app.get('/', asyncHandler(async (req, res) => {
   });
 }));
 
-// Initialize super admin with secure password
-const initializeSuperAdmin = async () => {
-  try {
-    const AdminUser = require('./model/adminUser');
-    
-    // Check if super admin already exists
-    const superAdminExists = await AdminUser.findOne({ 
-      clearanceLevel: 'super_admin'
-    });
-    
-    if (!superAdminExists) {
-      console.log('🔄 Creating initial super admin user...');
-      
-      // Generate secure password
-      const saltRounds = 12;
-      const hashedPassword = await bcrypt.hash('Admin123!@#', saltRounds);
-      
-      const superAdmin = new AdminUser({
-        username: 'superadmin',
-        password: hashedPassword,
-        name: 'Super Administrator',
-        email: 'superadmin@yonasmarketplace.com',
-        clearanceLevel: 'super_admin',
-        isActive: true
-      });
-      
-      await superAdmin.save();
-      console.log('✅ Super admin user created successfully');
-      console.log('📧 Username: superadmin');
-      console.log('🔑 Password: Admin123!@#');
-      console.log('⚠️  IMPORTANT: Change this password immediately after first login!');
-    } else {
-      console.log('✅ Super admin user already exists');
-    }
-  } catch (error) {
-    console.error('❌ Error initializing super admin:', error);
-  }
-};
-
-// Initialize data when database is connected
+// Initialize database connection
 db.once('open', async () => {
   console.log('✅ Connected to Database');
-  await initializeSuperAdmin();
 });
 
 // 404 handler
@@ -249,7 +204,6 @@ app.use('*', (req, res) => {
       '/variantTypes',
       '/variants',
       '/products',
-      '/couponCodes',
       '/posters',
       '/users',
       '/orders',
@@ -257,7 +211,6 @@ app.use('*', (req, res) => {
       '/notification',
       '/verification',
       '/ratings',
-      '/admin-users',
       '/health'
     ]
   });
@@ -295,21 +248,6 @@ app.use((error, req, res, next) => {
       success: false,
       message: 'Validation failed',
       errors: errors
-    });
-  }
-  
-  // JWT errors
-  if (error.name === 'JsonWebTokenError') {
-    return res.status(401).json({
-      success: false,
-      message: 'Invalid token'
-    });
-  }
-  
-  if (error.name === 'TokenExpiredError') {
-    return res.status(401).json({
-      success: false,
-      message: 'Token expired'
     });
   }
   

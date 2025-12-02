@@ -68,11 +68,6 @@ const productSchema = new mongoose.Schema({
             required: true
         }
     }],
-    createdBy: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'AdminUser',
-        required: [true, 'Product creator is required']
-    },
     isActive: {
         type: Boolean,
         default: true
@@ -97,25 +92,7 @@ productSchema.virtual('hasDiscount').get(function() {
 productSchema.index({ name: 'text', description: 'text' });
 productSchema.index({ proCategoryId: 1 });
 productSchema.index({ proSubCategoryId: 1 });
-productSchema.index({ createdBy: 1 });
 productSchema.index({ createdAt: -1 });
-
-// Middleware to validate category and subcategory relationship
-productSchema.pre('save', async function(next) {
-    if (this.isModified('proCategoryId') || this.isModified('proSubCategoryId')) {
-        try {
-            const SubCategory = mongoose.model('SubCategory');
-            const subCategory = await SubCategory.findById(this.proSubCategoryId);
-            
-            if (subCategory && subCategory.categoryId.toString() !== this.proCategoryId.toString()) {
-                return next(new Error('Subcategory does not belong to the selected category'));
-            }
-        } catch (error) {
-            return next(error);
-        }
-    }
-    next();
-});
 
 const Product = mongoose.model('Product', productSchema);
 module.exports = Product;

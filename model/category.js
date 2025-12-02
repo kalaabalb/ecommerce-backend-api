@@ -8,12 +8,6 @@ const categorySchema = new mongoose.Schema({
     image: { 
         type: String, 
         required: true 
-    },
-    // Add createdBy field
-    createdBy: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'AdminUser',
-        required: true
     }
 }, { timestamps: true });
 

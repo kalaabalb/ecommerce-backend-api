@@ -6,21 +6,11 @@ const Product = require('../model/product');
 const { uploadCategory } = require('../uploadFile');
 const multer = require('multer');
 const asyncHandler = require('express-async-handler');
-const { verifyAdmin } = require('../middleware/auth');
 
-// Get all categories - FILTER BY ADMIN
+// Get all categories
 router.get('/', asyncHandler(async (req, res) => {
     try {
-        const { adminId } = req.query;
-        
-        let filter = {};
-        if (adminId) {
-            filter.createdBy = adminId;
-        }
-
-        const categories = await Category.find(filter)
-            .populate('createdBy', 'username name')
-            .sort({ _id: -1 });
+        const categories = await Category.find().sort({ _id: -1 });
         res.json({ success: true, message: "Categories retrieved successfully.", data: categories });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
@@ -31,8 +21,7 @@ router.get('/', asyncHandler(async (req, res) => {
 router.get('/:id', asyncHandler(async (req, res) => {
     try {
         const categoryID = req.params.id;
-        const category = await Category.findById(categoryID)
-            .populate('createdBy', 'username name');
+        const category = await Category.findById(categoryID);
         
         if (!category) {
             return res.status(404).json({ success: false, message: "Category not found." });
@@ -44,8 +33,8 @@ router.get('/:id', asyncHandler(async (req, res) => {
     }
 }));
 
-// Create a new category - SIMPLE ADMIN CHECK
-router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
+// Create a new category
+router.post('/', asyncHandler(async (req, res) => {
     try {
         uploadCategory.single('img')(req, res, async function (err) {
             if (err instanceof multer.MulterError) {
@@ -54,7 +43,7 @@ router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
                 return res.json({ success: false, message: err.message });
             }
             
-            const { name, adminId } = req.body; // Use adminId consistently
+            const { name } = req.body;
             let imageUrl = '';
 
             if (req.file) {
@@ -69,15 +58,10 @@ router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
                 return res.status(400).json({ success: false, message: "Image is required." });
             }
 
-            if (!adminId) {
-                return res.status(400).json({ success: false, message: "Admin ID is required." });
-            }
-
             try {
                 const newCategory = new Category({
                     name: name,
-                    image: imageUrl,
-                    createdBy: adminId // Use adminId as createdBy
+                    image: imageUrl
                 });
                 
                 await newCategory.save();
@@ -91,8 +75,8 @@ router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
     }
 }));
 
-// Update a category - SIMPLE OWNERSHIP CHECK
-router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+// Update a category
+router.put('/:id', asyncHandler(async (req, res) => {
     try {
         const categoryID = req.params.id;
         uploadCategory.single('img')(req, res, async function (err) {
@@ -102,7 +86,7 @@ router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
                 return res.json({ success: false, message: err.message });
             }
 
-            const { name, adminId } = req.body; // Use adminId consistently
+            const { name } = req.body;
             let image = req.body.image;
 
             if (req.file) {
@@ -113,20 +97,10 @@ router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
                 return res.status(400).json({ success: false, message: "Name and image are required." });
             }
 
-            if (!adminId) {
-                return res.status(400).json({ success: false, message: "Admin ID is required." });
-            }
-
             try {
-                // Find category and check ownership
                 const category = await Category.findById(categoryID);
                 if (!category) {
                     return res.status(404).json({ success: false, message: "Category not found." });
-                }
-
-                // Super admin can edit anything, regular admins only their own
-                if (req.admin.clearanceLevel !== 'super_admin' && category.createdBy.toString() !== adminId) {
-                    return res.status(403).json({ success: false, message: "You can only edit your own categories." });
                 }
 
                 const updatedCategory = await Category.findByIdAndUpdate(
@@ -145,25 +119,14 @@ router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
     }
 }));
 
-// Delete a category - SIMPLE OWNERSHIP CHECK
-router.delete('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+// Delete a category
+router.delete('/:id', asyncHandler(async (req, res) => {
     try {
         const categoryID = req.params.id;
-        const { adminId } = req.body;
 
-        if (!adminId) {
-            return res.status(400).json({ success: false, message: "Admin ID is required." });
-        }
-
-        // Find category and check ownership
         const category = await Category.findById(categoryID);
         if (!category) {
             return res.status(404).json({ success: false, message: "Category not found." });
-        }
-
-        // Super admin can delete anything, regular admins only their own
-        if (req.admin.clearanceLevel !== 'super_admin' && category.createdBy.toString() !== adminId) {
-            return res.status(403).json({ success: false, message: "You can only delete your own categories." });
         }
 
         // Check if any subcategories reference this category

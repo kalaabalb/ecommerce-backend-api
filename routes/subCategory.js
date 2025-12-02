@@ -4,21 +4,12 @@ const SubCategory = require('../model/subCategory');
 const Brand = require('../model/brand');
 const Product = require('../model/product');
 const asyncHandler = require('express-async-handler');
-const { verifyAdmin } = require('../middleware/auth');
 
-// Get all sub-categories - FILTER BY ADMIN
+// Get all sub-categories
 router.get('/', asyncHandler(async (req, res) => {
     try {
-        const { adminId } = req.query;
-        
-        let filter = {};
-        if (adminId) {
-            filter.createdBy = adminId;
-        }
-
-        const subCategories = await SubCategory.find(filter)
+        const subCategories = await SubCategory.find()
             .populate('categoryId')
-            .populate('createdBy', 'username name')
             .sort({ _id: -1 });
         
         res.json({ success: true, message: "Sub-categories retrieved successfully.", data: subCategories });
@@ -32,8 +23,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
     try {
         const subCategoryID = req.params.id;
         const subCategory = await SubCategory.findById(subCategoryID)
-            .populate('categoryId')
-            .populate('createdBy', 'username name');
+            .populate('categoryId');
             
         if (!subCategory) {
             return res.status(404).json({ success: false, message: "Sub-category not found." });
@@ -44,16 +34,16 @@ router.get('/:id', asyncHandler(async (req, res) => {
     }
 }));
 
-// Create a new sub-category - SIMPLE ADMIN CHECK
-router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
-    const { name, categoryId, adminId } = req.body;
+// Create a new sub-category
+router.post('/', asyncHandler(async (req, res) => {
+    const { name, categoryId } = req.body;
     
     if (!name || !categoryId) {
         return res.status(400).json({ success: false, message: "Name and category ID are required." });
     }
 
     try {
-        const subCategory = new SubCategory({ name, categoryId, createdBy: adminId });
+        const subCategory = new SubCategory({ name, categoryId });
         const newSubCategory = await subCategory.save();
         res.json({ success: true, message: "Sub-category created successfully.", data: newSubCategory });
     } catch (error) {
@@ -61,25 +51,19 @@ router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
     }
 }));
 
-// Update a sub-category - SIMPLE OWNERSHIP CHECK
-router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+// Update a sub-category
+router.put('/:id', asyncHandler(async (req, res) => {
     const subCategoryID = req.params.id;
-    const { name, categoryId, adminId } = req.body;
+    const { name, categoryId } = req.body;
     
     if (!name || !categoryId) {
         return res.status(400).json({ success: false, message: "Name and category ID are required." });
     }
 
     try {
-        // Find subcategory and check ownership
         const subCategory = await SubCategory.findById(subCategoryID);
         if (!subCategory) {
             return res.status(404).json({ success: false, message: "Sub-category not found." });
-        }
-
-        // Super admin can edit anything, regular admins only their own
-        if (req.admin.clearanceLevel !== 'super_admin' && subCategory.createdBy.toString() !== adminId) {
-            return res.status(403).json({ success: false, message: "You can only edit your own sub-categories." });
         }
 
         const updatedSubCategory = await SubCategory.findByIdAndUpdate(
@@ -94,21 +78,14 @@ router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
     }
 }));
 
-// Delete a sub-category - SIMPLE OWNERSHIP CHECK
-router.delete('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+// Delete a sub-category
+router.delete('/:id', asyncHandler(async (req, res) => {
     const subCategoryID = req.params.id;
-    const { adminId } = req.body;
     
     try {
-        // Find subcategory and check ownership
         const subCategory = await SubCategory.findById(subCategoryID);
         if (!subCategory) {
             return res.status(404).json({ success: false, message: "Sub-category not found." });
-        }
-
-        // Super admin can delete anything, regular admins only their own
-        if (req.admin.clearanceLevel !== 'super_admin' && subCategory.createdBy.toString() !== adminId) {
-            return res.status(403).json({ success: false, message: "You can only delete your own sub-categories." });
         }
 
         // Check if any brand is associated with the sub-category

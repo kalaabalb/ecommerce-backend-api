@@ -4,19 +4,13 @@ const Product = require('../model/product');
 const multer = require('multer');
 const { uploadProduct } = require('../uploadFile');
 const asyncHandler = require('express-async-handler');
-const { verifyAdmin } = require('../middleware/auth');
 
-// Get all products - FILTER BY ADMIN with better error handling
+// Get all products with filtering
 router.get('/', asyncHandler(async (req, res) => {
     try {
-        const { adminId, search, category, inStock } = req.query;
+        const { search, category, inStock } = req.query;
         
         let filter = {};
-        
-        // Filter by admin if provided
-        if (adminId) {
-            filter.createdBy = adminId;
-        }
         
         // Search filter
         if (search) {
@@ -41,7 +35,6 @@ router.get('/', asyncHandler(async (req, res) => {
             .populate('proBrandId', 'id name')
             .populate('proVariantTypeId', 'id type')
             .populate('proVariantId', 'id name')
-            .populate('createdBy', 'username name email')
             .sort({ _id: -1 });
             
         res.json({ 
@@ -59,7 +52,7 @@ router.get('/', asyncHandler(async (req, res) => {
     }
 }));
 
-// Get a product by ID with better error handling
+// Get a product by ID
 router.get('/:id', asyncHandler(async (req, res) => {
     try {
         const productID = req.params.id;
@@ -76,8 +69,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
             .populate('proSubCategoryId', 'id name')
             .populate('proBrandId', 'id name')
             .populate('proVariantTypeId', 'id name')
-            .populate('proVariantId', 'id name')
-            .populate('createdBy', 'username name email');
+            .populate('proVariantId', 'id name');
         
         if (!product) {
             return res.status(404).json({ 
@@ -106,8 +98,8 @@ router.get('/:id', asyncHandler(async (req, res) => {
     }
 }));
 
-// Create new product - Enhanced with better validation
-router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
+// Create new product
+router.post('/', asyncHandler(async (req, res) => {
     try {
         uploadProduct.fields([
             { name: 'image1', maxCount: 1 },
@@ -139,8 +131,7 @@ router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
                     proSubCategoryId, 
                     proBrandId, 
                     proVariantTypeId, 
-                    proVariantId, 
-                    adminId 
+                    proVariantId
                 } = req.body;
 
                 // Enhanced validation
@@ -178,13 +169,6 @@ router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
                         message: "Product subcategory is required." 
                     });
                 }
-                
-                if (!adminId) {
-                    return res.status(400).json({ 
-                        success: false, 
-                        message: "Admin ID is required." 
-                    });
-                }
 
                 // Process images
                 const imageUrls = [];
@@ -215,7 +199,6 @@ router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
                     proBrandId,
                     proVariantTypeId, 
                     proVariantId: proVariantId ? (Array.isArray(proVariantId) ? proVariantId : [proVariantId]) : [],
-                    createdBy: adminId, // Use adminId as createdBy
                     images: imageUrls 
                 });
 
@@ -225,8 +208,7 @@ router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
                 const populatedProduct = await Product.findById(newProduct._id)
                     .populate('proCategoryId', 'id name')
                     .populate('proSubCategoryId', 'id name')
-                    .populate('proBrandId', 'id name')
-                    .populate('createdBy', 'username name email');
+                    .populate('proBrandId', 'id name');
 
                 res.status(201).json({ 
                     success: true, 
@@ -259,8 +241,8 @@ router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
     }
 }));
 
-// Update a product - Enhanced with better ownership checks
-router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+// Update a product
+router.put('/:id', asyncHandler(async (req, res) => {
     const productId = req.params.id;
     
     if (!productId) {
@@ -301,35 +283,15 @@ router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
                     proSubCategoryId, 
                     proBrandId, 
                     proVariantTypeId, 
-                    proVariantId, 
-                    adminId 
+                    proVariantId
                 } = req.body;
 
-                // Find product and check ownership
+                // Find product
                 const product = await Product.findById(productId);
                 if (!product) {
                     return res.status(404).json({ 
                         success: false, 
                         message: "Product not found." 
-                    });
-                }
-
-                // Enhanced ownership check
-                if (!adminId) {
-                    return res.status(400).json({ 
-                        success: false, 
-                        message: "Admin ID is required for this operation." 
-                    });
-                }
-
-                // Super admin can edit anything, regular admins only their own
-                const isSuperAdmin = req.admin.clearanceLevel === 'super_admin';
-                const isOwner = product.createdBy.toString() === adminId;
-                
-                if (!isSuperAdmin && !isOwner) {
-                    return res.status(403).json({ 
-                        success: false, 
-                        message: "You can only edit your own products." 
                     });
                 }
 
@@ -373,8 +335,7 @@ router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
                 const updatedProduct = await Product.findById(productId)
                     .populate('proCategoryId', 'id name')
                     .populate('proSubCategoryId', 'id name')
-                    .populate('proBrandId', 'id name')
-                    .populate('createdBy', 'username name email');
+                    .populate('proBrandId', 'id name');
 
                 res.json({ 
                     success: true, 
@@ -406,22 +367,14 @@ router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
     }
 }));
 
-// Delete a product - Enhanced with better error handling
-router.delete('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+// Delete a product
+router.delete('/:id', asyncHandler(async (req, res) => {
     const productID = req.params.id;
-    const { adminId } = req.body;
     
     if (!productID) {
         return res.status(400).json({ 
             success: false, 
             message: "Product ID is required." 
-        });
-    }
-    
-    if (!adminId) {
-        return res.status(400).json({ 
-            success: false, 
-            message: "Admin ID is required for this operation." 
         });
     }
     
@@ -431,17 +384,6 @@ router.delete('/:id', verifyAdmin, asyncHandler(async (req, res) => {
             return res.status(404).json({ 
                 success: false, 
                 message: "Product not found. It may have been already deleted." 
-            });
-        }
-
-        // Enhanced ownership check
-        const isSuperAdmin = req.admin.clearanceLevel === 'super_admin';
-        const isOwner = product.createdBy.toString() === adminId;
-        
-        if (!isSuperAdmin && !isOwner) {
-            return res.status(403).json({ 
-                success: false, 
-                message: "You can only delete your own products." 
             });
         }
 

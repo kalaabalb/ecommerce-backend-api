@@ -2,8 +2,6 @@ const express = require('express');
 const asyncHandler = require('express-async-handler');
 const router = express.Router();
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
 const { uploadPaymentProof, cloudinary } = require('../uploadFile');
 
 // Upload payment proof to Cloudinary
@@ -32,7 +30,7 @@ router.post('/upload-proof', uploadPaymentProof.single('proofImage'), asyncHandl
 router.post('/upload-proof-base64', asyncHandler(async (req, res) => {
   try {
     console.log('🟡 [UPLOAD-BASE64] Received upload request');
-    const { image, fileName, orderAmount } = req.body;
+    const { image, fileName } = req.body;
     
     if (!image || !fileName) {
       console.log('🔴 [UPLOAD-BASE64] Missing image or fileName');

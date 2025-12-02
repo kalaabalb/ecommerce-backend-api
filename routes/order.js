@@ -8,7 +8,6 @@ const Product = require('../model/product');
 router.get('/', asyncHandler(async (req, res) => {
     try {
         const orders = await Order.find()
-        .populate('couponCode', 'id couponCode discountType discountAmount')
         .populate('userID', 'id name').sort({ _id: -1 });
         res.json({ success: true, message: "Orders retrieved successfully.", data: orders });
     } catch (error) {
@@ -21,7 +20,6 @@ router.get('/orderByUserId/:userId', asyncHandler(async (req, res) => {
     try {
         const userId = req.params.userId;
         const orders = await Order.find({ userID: userId })
-            .populate('couponCode', 'id couponCode discountType discountAmount')
             .populate('userID', 'id name')
             .sort({ _id: -1 });
         res.json({ success: true, message: "Orders retrieved successfully.", data: orders });
@@ -35,7 +33,6 @@ router.get('/:id', asyncHandler(async (req, res) => {
     try {
         const orderID = req.params.id;
         const order = await Order.findById(orderID)
-        .populate('couponCode', 'id couponCode discountType discountAmount')
         .populate('userID', 'id name');
         if (!order) {
             return res.status(404).json({ success: false, message: "Order not found." });
@@ -48,7 +45,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
 
 // Create a new order
 router.post('/', asyncHandler(async (req, res) => {
-    const { userID, orderStatus, items, totalPrice, shippingAddress, paymentMethod, paymentStatus, paymentProof, couponCode, orderTotal, trackingUrl } = req.body;
+    const { userID, orderStatus, items, totalPrice, shippingAddress, paymentMethod, paymentStatus, paymentProof, orderTotal, trackingUrl } = req.body;
     
     if (!userID || !items || !totalPrice || !shippingAddress || !paymentMethod || !orderTotal) {
         return res.status(400).json({ success: false, message: "User ID, items, totalPrice, shippingAddress, paymentMethod, and orderTotal are required." });
@@ -65,27 +62,15 @@ router.post('/', asyncHandler(async (req, res) => {
     const finalOrderStatus = orderStatus || (paymentMethod === 'cod' ? 'pending' : 'payment_pending');
 
     try {
-        // Add product owner info to each item
-        const itemsWithOwners = await Promise.all(
-            items.map(async (item) => {
-                const product = await Product.findById(item.productID).select('createdBy');
-                return {
-                    ...item,
-                    productOwner: product ? product.createdBy : null
-                };
-            })
-        );
-
         const order = new Order({ 
             userID, 
             orderStatus: finalOrderStatus, 
-            items: itemsWithOwners, 
+            items, 
             totalPrice, 
             shippingAddress, 
             paymentMethod, 
             paymentStatus: finalPaymentStatus,
             paymentProof,
-            couponCode, 
             orderTotal, 
             trackingUrl 
         });
@@ -212,7 +197,6 @@ router.get('/payment-status/:status', asyncHandler(async (req, res) => {
         }
 
         const orders = await Order.find({ paymentStatus: paymentStatus })
-            .populate('couponCode', 'id couponCode discountType discountAmount')
             .populate('userID', 'id name')
             .sort({ _id: -1 });
 
@@ -230,7 +214,6 @@ router.get('/admin/pending-verification', asyncHandler(async (req, res) => {
             paymentStatus: 'pending',
             'paymentProof.imageUrl': { $exists: true, $ne: null }
         })
-        .populate('couponCode', 'id couponCode discountType discountAmount')
         .populate('userID', 'id name')
         .sort({ _id: -1 });
 

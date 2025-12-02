@@ -4,21 +4,11 @@ const VariantType = require('../model/variantType');
 const Product = require('../model/product');
 const Variant = require('../model/variant');
 const asyncHandler = require('express-async-handler');
-const { verifyAdmin } = require('../middleware/auth');
 
-// Get all variant types - FILTER BY ADMIN
+// Get all variant types
 router.get('/', asyncHandler(async (req, res) => {
     try {
-        const { adminId } = req.query;
-        
-        let filter = {};
-        if (adminId) {
-            filter.createdBy = adminId;
-        }
-
-        const variantTypes = await VariantType.find(filter)
-            .populate('createdBy', 'username name')
-            .sort({ _id: -1 });
+        const variantTypes = await VariantType.find().sort({ _id: -1 });
         
         res.json({ success: true, message: "VariantTypes retrieved successfully.", data: variantTypes });
     } catch (error) {
@@ -30,8 +20,7 @@ router.get('/', asyncHandler(async (req, res) => {
 router.get('/:id', asyncHandler(async (req, res) => {
     try {
         const variantTypeID = req.params.id;
-        const variantType = await VariantType.findById(variantTypeID)
-            .populate('createdBy', 'username name');
+        const variantType = await VariantType.findById(variantTypeID);
             
         if (!variantType) {
             return res.status(404).json({ success: false, message: "VariantType not found." });
@@ -42,16 +31,16 @@ router.get('/:id', asyncHandler(async (req, res) => {
     }
 }));
 
-// Create a new variant type - SIMPLE ADMIN CHECK
-router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
-    const { name, type, adminId } = req.body;
+// Create a new variant type
+router.post('/', asyncHandler(async (req, res) => {
+    const { name, type } = req.body;
     
     if (!name) {
         return res.status(400).json({ success: false, message: "Name is required." });
     }
 
     try {
-        const variantType = new VariantType({ name, type, createdBy: adminId });
+        const variantType = new VariantType({ name, type });
         const newVariantType = await variantType.save();
         res.json({ success: true, message: "VariantType created successfully.", data: newVariantType });
     } catch (error) {
@@ -59,25 +48,19 @@ router.post('/', verifyAdmin, asyncHandler(async (req, res) => {
     }
 }));
 
-// Update a variant type - SIMPLE OWNERSHIP CHECK
-router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+// Update a variant type
+router.put('/:id', asyncHandler(async (req, res) => {
     const variantTypeID = req.params.id;
-    const { name, type, adminId } = req.body;
+    const { name, type } = req.body;
     
     if (!name) {
         return res.status(400).json({ success: false, message: "Name is required." });
     }
 
     try {
-        // Find variant type and check ownership
         const variantType = await VariantType.findById(variantTypeID);
         if (!variantType) {
             return res.status(404).json({ success: false, message: "VariantType not found." });
-        }
-
-        // Super admin can edit anything, regular admins only their own
-        if (req.admin.clearanceLevel !== 'super_admin' && variantType.createdBy.toString() !== adminId) {
-            return res.status(403).json({ success: false, message: "You can only edit your own variant types." });
         }
 
         const updatedVariantType = await VariantType.findByIdAndUpdate(
@@ -92,21 +75,14 @@ router.put('/:id', verifyAdmin, asyncHandler(async (req, res) => {
     }
 }));
 
-// Delete a variant type - SIMPLE OWNERSHIP CHECK
-router.delete('/:id', verifyAdmin, asyncHandler(async (req, res) => {
+// Delete a variant type
+router.delete('/:id', asyncHandler(async (req, res) => {
     const variantTypeID = req.params.id;
-    const { adminId } = req.body;
     
     try {
-        // Find variant type and check ownership
         const variantType = await VariantType.findById(variantTypeID);
         if (!variantType) {
             return res.status(404).json({ success: false, message: "Variant type not found." });
-        }
-
-        // Super admin can delete anything, regular admins only their own
-        if (req.admin.clearanceLevel !== 'super_admin' && variantType.createdBy.toString() !== adminId) {
-            return res.status(403).json({ success: false, message: "You can only delete your own variant types." });
         }
 
         // Check if any variant is associated with this variant type
