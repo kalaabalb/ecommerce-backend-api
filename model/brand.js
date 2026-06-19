@@ -1,16 +1,19 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
-const brandSchema = new mongoose.Schema({
+const brandSchema = new mongoose.Schema(
+  {
     name: {
-        type: String,
-        required: [true, 'Name is required'],
-        trim: true
+      type: String,
+      required: [true, "Name is required"],
+      trim: true,
     },
     subcategoryId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'SubCategory',
-        required: [true, 'Subcategory ID is required']
-    }
-},{ timestamps: true });
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "SubCategory",
+      required: [true, "Subcategory ID is required"],
+    },
+  },
+  { timestamps: true },
+);
 
-module.exports = mongoose.model('Brand', brandSchema);
+module.exports = mongoose.model("Brand", brandSchema);

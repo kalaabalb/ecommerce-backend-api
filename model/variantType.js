@@ -1,16 +1,19 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
-const variantTypeSchema = new mongoose.Schema({
+const variantTypeSchema = new mongoose.Schema(
+  {
     name: {
-        type: String,
-        required: [true, 'Name is required'], 
-        trim: true
+      type: String,
+      required: [true, "Name is required"],
+      trim: true,
     },
     type: {
-        type: String,
-        required: [true, 'Type is required'],
-        trim: true
-    }
-},{ timestamps: true });
+      type: String,
+      required: [true, "Type is required"],
+      trim: true,
+    },
+  },
+  { timestamps: true },
+);
 
-module.exports = mongoose.model('VariantType', variantTypeSchema);
+module.exports = mongoose.model("VariantType", variantTypeSchema);

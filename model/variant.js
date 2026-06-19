@@ -1,15 +1,18 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
-const variantSchema = new mongoose.Schema({
+const variantSchema = new mongoose.Schema(
+  {
     name: {
-        type: String,
-        required: true
+      type: String,
+      required: true,
     },
     variantTypeId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'VariantType',
-        required: true
-    }
-},{ timestamps: true });
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "VariantType",
+      required: true,
+    },
+  },
+  { timestamps: true },
+);
 
-module.exports = mongoose.model('Variant', variantSchema);
+module.exports = mongoose.model("Variant", variantSchema);

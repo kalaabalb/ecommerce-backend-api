@@ -1,17 +1,20 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
-const posterSchema = new mongoose.Schema({
-  posterName: {
-    type: String,
-    required: true,
-    trim: true
+const posterSchema = new mongoose.Schema(
+  {
+    posterName: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    imageUrl: {
+      type: String,
+      required: true,
+    },
   },
-  imageUrl: {
-    type: String,
-    required: true
-  }
-}, {
-  timestamps: true 
-});
+  {
+    timestamps: true,
+  },
+);
 
-module.exports = mongoose.model('Poster', posterSchema);
+module.exports = mongoose.model("Poster", posterSchema);
