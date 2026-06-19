@@ -170,14 +170,14 @@ app.get('/health', asyncHandler(async (req, res) => {
   res.json({ 
     success: true, 
     message: 'API is healthy', 
-    data: {
-      timestamp: new Date().toISOString(),
-      database: dbStatus,
-      environment: process.env.NODE_ENV || 'development',
-      platform: 'Render',
-      version: '1.0.0'
-    }
-  });
+      data: {
+        timestamp: new Date().toISOString(),
+        database: dbStatus,
+        environment: process.env.NODE_ENV || 'development',
+        platform: 'Render',
+        version: '1.0.1'
+      }
+    });
 }));
 
 // Test route
@@ -186,7 +186,7 @@ app.get('/', asyncHandler(async (req, res) => {
     success: true, 
     message: 'API working successfully on Render', 
     data: {
-      version: '1.0.0',
+      version: '1.0.1',
       environment: process.env.NODE_ENV || 'development',
       database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
       timestamp: new Date().toISOString()
