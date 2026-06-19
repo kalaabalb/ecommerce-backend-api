@@ -12,6 +12,11 @@ const brandSchema = new mongoose.Schema(
       ref: "SubCategory",
       required: [true, "Subcategory ID is required"],
     },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "AdminUser",
+      default: null,
+    },
   },
   { timestamps: true },
 );

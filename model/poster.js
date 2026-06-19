@@ -11,6 +11,11 @@ const posterSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "AdminUser",
+      default: null,
+    },
   },
   {
     timestamps: true,

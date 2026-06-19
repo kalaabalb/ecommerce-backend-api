@@ -4,13 +4,20 @@ const SubCategory = require("../model/subCategory");
 const Brand = require("../model/brand");
 const Product = require("../model/product");
 const asyncHandler = require("express-async-handler");
+const {
+  buildOwnedQuery,
+  canAccessOwnedDocument,
+  loadAdmin,
+  requireAdminAuth,
+} = require("../middleware/adminAccess");
 
 // Get all sub-categories
 router.get(
   "/",
+  loadAdmin,
   asyncHandler(async (req, res) => {
     try {
-      const subCategories = await SubCategory.find()
+      const subCategories = await SubCategory.find(buildOwnedQuery(req, {}))
         .populate("categoryId")
         .sort({ _id: -1 });
 
@@ -28,6 +35,7 @@ router.get(
 // Get a sub-category by ID
 router.get(
   "/:id",
+  loadAdmin,
   asyncHandler(async (req, res) => {
     try {
       const subCategoryID = req.params.id;
@@ -38,6 +46,12 @@ router.get(
         return res
           .status(404)
           .json({ success: false, message: "Sub-category not found." });
+      }
+      if (!canAccessOwnedDocument(req, subCategory)) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only access sub-categories you created.",
+        });
       }
       res.json({
         success: true,
@@ -53,6 +67,7 @@ router.get(
 // Create a new sub-category
 router.post(
   "/",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     const { name, categoryId } = req.body;
 
@@ -66,7 +81,11 @@ router.post(
     }
 
     try {
-      const subCategory = new SubCategory({ name, categoryId });
+      const subCategory = new SubCategory({
+        name,
+        categoryId,
+        createdBy: req.adminUser._id,
+      });
       const newSubCategory = await subCategory.save();
       res.json({
         success: true,
@@ -82,6 +101,7 @@ router.post(
 // Update a sub-category
 router.put(
   "/:id",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     const subCategoryID = req.params.id;
     const { name, categoryId } = req.body;
@@ -102,10 +122,20 @@ router.put(
           .status(404)
           .json({ success: false, message: "Sub-category not found." });
       }
+      if (!canAccessOwnedDocument(req, subCategory)) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only edit sub-categories you created.",
+        });
+      }
 
       const updatedSubCategory = await SubCategory.findByIdAndUpdate(
         subCategoryID,
-        { name, categoryId },
+        {
+          name,
+          categoryId,
+          createdBy: subCategory.createdBy || req.adminUser._id,
+        },
         { new: true },
       );
 
@@ -123,6 +153,7 @@ router.put(
 // Delete a sub-category
 router.delete(
   "/:id",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     const subCategoryID = req.params.id;
 
@@ -132,6 +163,12 @@ router.delete(
         return res
           .status(404)
           .json({ success: false, message: "Sub-category not found." });
+      }
+      if (!canAccessOwnedDocument(req, subCategory)) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only delete sub-categories you created.",
+        });
       }
 
       // Check if any brand is associated with the sub-category

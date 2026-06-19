@@ -4,15 +4,22 @@ const Product = require("../model/product");
 const multer = require("multer");
 const { uploadProduct } = require("../uploadFile");
 const asyncHandler = require("express-async-handler");
+const {
+  buildOwnedQuery,
+  canAccessOwnedDocument,
+  loadAdmin,
+  requireAdminAuth,
+} = require("../middleware/adminAccess");
 
 // Get all products with filtering
 router.get(
   "/",
+  loadAdmin,
   asyncHandler(async (req, res) => {
     try {
       const { search, category, inStock } = req.query;
 
-      let filter = {};
+      let filter = buildOwnedQuery(req, {});
 
       // Search filter
       if (search) {
@@ -37,6 +44,7 @@ router.get(
         .populate("proBrandId", "id name")
         .populate("proVariantTypeId", "id type")
         .populate("proVariantId", "id name")
+        .populate("createdBy", "id name username")
         .sort({ _id: -1 });
 
       res.json({
@@ -58,6 +66,7 @@ router.get(
 // Get a product by ID
 router.get(
   "/:id",
+  loadAdmin,
   asyncHandler(async (req, res) => {
     try {
       const productID = req.params.id;
@@ -74,12 +83,20 @@ router.get(
         .populate("proSubCategoryId", "id name")
         .populate("proBrandId", "id name")
         .populate("proVariantTypeId", "id name")
-        .populate("proVariantId", "id name");
+        .populate("proVariantId", "id name")
+        .populate("createdBy", "id name username");
 
       if (!product) {
         return res.status(404).json({
           success: false,
           message: "Product not found. It may have been deleted.",
+        });
+      }
+
+      if (!canAccessOwnedDocument(req, product)) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only access products you created.",
         });
       }
 
@@ -107,6 +124,7 @@ router.get(
 // Create new product
 router.post(
   "/",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     try {
       uploadProduct.fields([
@@ -212,6 +230,7 @@ router.post(
                 : [proVariantId]
               : [],
             images: imageUrls,
+            createdBy: req.adminUser._id,
           });
 
           await newProduct.save();
@@ -258,6 +277,7 @@ router.post(
 // Update a product
 router.put(
   "/:id",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     const productId = req.params.id;
 
@@ -308,6 +328,13 @@ router.put(
             return res.status(404).json({
               success: false,
               message: "Product not found.",
+            });
+          }
+
+          if (!canAccessOwnedDocument(req, product)) {
+            return res.status(403).json({
+              success: false,
+              message: "You can only edit products you created.",
             });
           }
 
@@ -394,6 +421,7 @@ router.put(
 // Delete a product
 router.delete(
   "/:id",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     const productID = req.params.id;
 
@@ -410,6 +438,13 @@ router.delete(
         return res.status(404).json({
           success: false,
           message: "Product not found. It may have been already deleted.",
+        });
+      }
+
+      if (!canAccessOwnedDocument(req, product)) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only delete products you created.",
         });
       }
 

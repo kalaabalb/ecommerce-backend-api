@@ -11,6 +11,11 @@ const variantSchema = new mongoose.Schema(
       ref: "VariantType",
       required: true,
     },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "AdminUser",
+      default: null,
+    },
   },
   { timestamps: true },
 );

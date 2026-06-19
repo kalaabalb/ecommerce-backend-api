@@ -4,13 +4,22 @@ const Poster = require("../model/poster");
 const { uploadPosters } = require("../uploadFile");
 const multer = require("multer");
 const asyncHandler = require("express-async-handler");
+const {
+  buildOwnedQuery,
+  canAccessOwnedDocument,
+  loadAdmin,
+  requireAdminAuth,
+} = require("../middleware/adminAccess");
 
 // Get all posters
 router.get(
   "/",
+  loadAdmin,
   asyncHandler(async (req, res) => {
     try {
-      const posters = await Poster.find({}).sort({ _id: -1 });
+      const posters = await Poster.find(buildOwnedQuery(req, {})).sort({
+        _id: -1,
+      });
 
       res.json({
         success: true,
@@ -26,6 +35,7 @@ router.get(
 // Get a poster by ID
 router.get(
   "/:id",
+  loadAdmin,
   asyncHandler(async (req, res) => {
     try {
       const posterID = req.params.id;
@@ -35,6 +45,12 @@ router.get(
         return res
           .status(404)
           .json({ success: false, message: "Poster not found." });
+      }
+      if (!canAccessOwnedDocument(req, poster)) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only access posters you created.",
+        });
       }
       res.json({
         success: true,
@@ -50,6 +66,7 @@ router.get(
 // Create a new poster
 router.post(
   "/",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     try {
       uploadPosters.single("img")(req, res, async function (err) {
@@ -81,6 +98,7 @@ router.post(
           const newPoster = new Poster({
             posterName: posterName,
             imageUrl: imageUrl,
+            createdBy: req.adminUser._id,
           });
           await newPoster.save();
           res.json({
@@ -101,6 +119,7 @@ router.post(
 // Update a poster
 router.put(
   "/:id",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     try {
       const posterID = req.params.id;
@@ -131,10 +150,20 @@ router.put(
               .status(404)
               .json({ success: false, message: "Poster not found." });
           }
+          if (!canAccessOwnedDocument(req, poster)) {
+            return res.status(403).json({
+              success: false,
+              message: "You can only edit posters you created.",
+            });
+          }
 
           const updatedPoster = await Poster.findByIdAndUpdate(
             posterID,
-            { posterName: posterName, imageUrl: image },
+            {
+              posterName: posterName,
+              imageUrl: image,
+              createdBy: poster.createdBy || req.adminUser._id,
+            },
             { new: true },
           );
 
@@ -156,6 +185,7 @@ router.put(
 // Delete a poster
 router.delete(
   "/:id",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     const posterID = req.params.id;
 
@@ -165,6 +195,12 @@ router.delete(
         return res
           .status(404)
           .json({ success: false, message: "Poster not found." });
+      }
+      if (!canAccessOwnedDocument(req, poster)) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only delete posters you created.",
+        });
       }
 
       await Poster.findByIdAndDelete(posterID);

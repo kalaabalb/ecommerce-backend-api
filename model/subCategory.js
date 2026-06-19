@@ -12,6 +12,11 @@ const subCategorySchema = new mongoose.Schema(
       ref: "Category",
       required: [true, "Category ID is required"],
     },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "AdminUser",
+      default: null,
+    },
   },
   { timestamps: true },
 );

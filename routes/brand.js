@@ -3,13 +3,20 @@ const router = express.Router();
 const Brand = require("../model/brand");
 const Product = require("../model/product");
 const asyncHandler = require("express-async-handler");
+const {
+  buildOwnedQuery,
+  canAccessOwnedDocument,
+  loadAdmin,
+  requireAdminAuth,
+} = require("../middleware/adminAccess");
 
 // Get all brands
 router.get(
   "/",
+  loadAdmin,
   asyncHandler(async (req, res) => {
     try {
-      const brands = await Brand.find()
+      const brands = await Brand.find(buildOwnedQuery(req, {}))
         .populate("subcategoryId")
         .sort({ _id: -1 });
 
@@ -27,6 +34,7 @@ router.get(
 // Get a brand by ID
 router.get(
   "/:id",
+  loadAdmin,
   asyncHandler(async (req, res) => {
     try {
       const brandID = req.params.id;
@@ -36,6 +44,12 @@ router.get(
         return res
           .status(404)
           .json({ success: false, message: "Brand not found." });
+      }
+      if (!canAccessOwnedDocument(req, brand)) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only access brands you created.",
+        });
       }
       res.json({
         success: true,
@@ -51,6 +65,7 @@ router.get(
 // Create a new brand
 router.post(
   "/",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     const { name, subcategoryId } = req.body;
 
@@ -64,7 +79,11 @@ router.post(
     }
 
     try {
-      const brand = new Brand({ name, subcategoryId });
+      const brand = new Brand({
+        name,
+        subcategoryId,
+        createdBy: req.adminUser._id,
+      });
       const newBrand = await brand.save();
       res.json({
         success: true,
@@ -80,6 +99,7 @@ router.post(
 // Update a brand
 router.put(
   "/:id",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     const brandID = req.params.id;
     const { name, subcategoryId } = req.body;
@@ -100,10 +120,20 @@ router.put(
           .status(404)
           .json({ success: false, message: "Brand not found." });
       }
+      if (!canAccessOwnedDocument(req, brand)) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only edit brands you created.",
+        });
+      }
 
       const updatedBrand = await Brand.findByIdAndUpdate(
         brandID,
-        { name, subcategoryId },
+        {
+          name,
+          subcategoryId,
+          createdBy: brand.createdBy || req.adminUser._id,
+        },
         { new: true },
       );
 
@@ -121,6 +151,7 @@ router.put(
 // Delete a brand
 router.delete(
   "/:id",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     const brandID = req.params.id;
 
@@ -130,6 +161,12 @@ router.delete(
         return res
           .status(404)
           .json({ success: false, message: "Brand not found." });
+      }
+      if (!canAccessOwnedDocument(req, brand)) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only delete brands you created.",
+        });
       }
 
       // Check if any products reference this brand

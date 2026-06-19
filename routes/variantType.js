@@ -4,13 +4,22 @@ const VariantType = require("../model/variantType");
 const Product = require("../model/product");
 const Variant = require("../model/variant");
 const asyncHandler = require("express-async-handler");
+const {
+  buildOwnedQuery,
+  canAccessOwnedDocument,
+  loadAdmin,
+  requireAdminAuth,
+} = require("../middleware/adminAccess");
 
 // Get all variant types
 router.get(
   "/",
+  loadAdmin,
   asyncHandler(async (req, res) => {
     try {
-      const variantTypes = await VariantType.find().sort({ _id: -1 });
+      const variantTypes = await VariantType.find(buildOwnedQuery(req, {})).sort({
+        _id: -1,
+      });
 
       res.json({
         success: true,
@@ -26,6 +35,7 @@ router.get(
 // Get a variant type by ID
 router.get(
   "/:id",
+  loadAdmin,
   asyncHandler(async (req, res) => {
     try {
       const variantTypeID = req.params.id;
@@ -35,6 +45,12 @@ router.get(
         return res
           .status(404)
           .json({ success: false, message: "VariantType not found." });
+      }
+      if (!canAccessOwnedDocument(req, variantType)) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only access variant types you created.",
+        });
       }
       res.json({
         success: true,
@@ -50,6 +66,7 @@ router.get(
 // Create a new variant type
 router.post(
   "/",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     const { name, type } = req.body;
 
@@ -60,7 +77,11 @@ router.post(
     }
 
     try {
-      const variantType = new VariantType({ name, type });
+      const variantType = new VariantType({
+        name,
+        type,
+        createdBy: req.adminUser._id,
+      });
       const newVariantType = await variantType.save();
       res.json({
         success: true,
@@ -76,6 +97,7 @@ router.post(
 // Update a variant type
 router.put(
   "/:id",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     const variantTypeID = req.params.id;
     const { name, type } = req.body;
@@ -93,10 +115,20 @@ router.put(
           .status(404)
           .json({ success: false, message: "VariantType not found." });
       }
+      if (!canAccessOwnedDocument(req, variantType)) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only edit variant types you created.",
+        });
+      }
 
       const updatedVariantType = await VariantType.findByIdAndUpdate(
         variantTypeID,
-        { name, type },
+        {
+          name,
+          type,
+          createdBy: variantType.createdBy || req.adminUser._id,
+        },
         { new: true },
       );
 
@@ -114,6 +146,7 @@ router.put(
 // Delete a variant type
 router.delete(
   "/:id",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     const variantTypeID = req.params.id;
 
@@ -123,6 +156,12 @@ router.delete(
         return res
           .status(404)
           .json({ success: false, message: "Variant type not found." });
+      }
+      if (!canAccessOwnedDocument(req, variantType)) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only delete variant types you created.",
+        });
       }
 
       // Check if any variant is associated with this variant type

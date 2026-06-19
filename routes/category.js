@@ -6,13 +6,22 @@ const Product = require("../model/product");
 const { uploadCategory } = require("../uploadFile");
 const multer = require("multer");
 const asyncHandler = require("express-async-handler");
+const {
+  buildOwnedQuery,
+  canAccessOwnedDocument,
+  loadAdmin,
+  requireAdminAuth,
+} = require("../middleware/adminAccess");
 
 // Get all categories
 router.get(
   "/",
+  loadAdmin,
   asyncHandler(async (req, res) => {
     try {
-      const categories = await Category.find().sort({ _id: -1 });
+      const categories = await Category.find(buildOwnedQuery(req, {})).sort({
+        _id: -1,
+      });
       res.json({
         success: true,
         message: "Categories retrieved successfully.",
@@ -27,6 +36,7 @@ router.get(
 // Get a category by ID
 router.get(
   "/:id",
+  loadAdmin,
   asyncHandler(async (req, res) => {
     try {
       const categoryID = req.params.id;
@@ -36,6 +46,13 @@ router.get(
         return res
           .status(404)
           .json({ success: false, message: "Category not found." });
+      }
+
+      if (!canAccessOwnedDocument(req, category)) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only access categories you created.",
+        });
       }
 
       res.json({
@@ -52,6 +69,7 @@ router.get(
 // Create a new category
 router.post(
   "/",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     try {
       uploadCategory.single("img")(req, res, async function (err) {
@@ -84,6 +102,7 @@ router.post(
           const newCategory = new Category({
             name: name,
             image: imageUrl,
+            createdBy: req.adminUser._id,
           });
 
           await newCategory.save();
@@ -105,6 +124,7 @@ router.post(
 // Update a category
 router.put(
   "/:id",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     try {
       const categoryID = req.params.id;
@@ -136,9 +156,20 @@ router.put(
               .json({ success: false, message: "Category not found." });
           }
 
+          if (!canAccessOwnedDocument(req, category)) {
+            return res.status(403).json({
+              success: false,
+              message: "You can only edit categories you created.",
+            });
+          }
+
           const updatedCategory = await Category.findByIdAndUpdate(
             categoryID,
-            { name: name, image: image },
+            {
+              name: name,
+              image: image,
+              createdBy: category.createdBy || req.adminUser._id,
+            },
             { new: true },
           );
 
@@ -160,6 +191,7 @@ router.put(
 // Delete a category
 router.delete(
   "/:id",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     try {
       const categoryID = req.params.id;
@@ -169,6 +201,13 @@ router.delete(
         return res
           .status(404)
           .json({ success: false, message: "Category not found." });
+      }
+
+      if (!canAccessOwnedDocument(req, category)) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only delete categories you created.",
+        });
       }
 
       // Check if any subcategories reference this category

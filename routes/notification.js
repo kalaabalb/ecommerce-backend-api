@@ -3,6 +3,11 @@ const router = express.Router();
 const asyncHandler = require("express-async-handler");
 const Notification = require("../model/notification");
 const axios = require("axios");
+const {
+  buildOwnedQuery,
+  requireAdminAuth,
+  requireSuperAdmin,
+} = require("../middleware/adminAccess");
 
 const ONE_SIGNAL_APP_ID = process.env.ONE_SIGNAL_APP_ID;
 const ONE_SIGNAL_REST_API_KEY = process.env.ONE_SIGNAL_REST_API_KEY;
@@ -10,6 +15,8 @@ const ONE_SIGNAL_REST_API_KEY = process.env.ONE_SIGNAL_REST_API_KEY;
 // Send notification
 router.post(
   "/send-notification",
+  requireAdminAuth,
+  requireSuperAdmin,
   asyncHandler(async (req, res) => {
     const { title, description, imageUrl } = req.body;
 
@@ -40,6 +47,7 @@ router.post(
         title,
         description,
         imageUrl,
+        createdBy: req.adminUser._id,
       });
       await notification.save();
 
@@ -65,6 +73,7 @@ router.post(
 // Track notification
 router.get(
   "/track-notification/:id",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     const notificationId = req.params.id;
 
@@ -105,9 +114,12 @@ router.get(
 // Get all notifications
 router.get(
   "/all-notification",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     try {
-      const notifications = await Notification.find({}).sort({ _id: -1 });
+      const notifications = await Notification.find(
+        buildOwnedQuery(req, {}),
+      ).sort({ _id: -1 });
       res.json({
         success: true,
         message: "Notifications retrieved successfully.",
@@ -124,6 +136,8 @@ router.get(
 // Delete notification
 router.delete(
   "/delete-notification/:id",
+  requireAdminAuth,
+  requireSuperAdmin,
   asyncHandler(async (req, res) => {
     const notificationID = req.params.id;
     try {

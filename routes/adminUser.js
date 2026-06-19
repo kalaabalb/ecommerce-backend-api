@@ -2,58 +2,11 @@ const express = require("express");
 const asyncHandler = require("express-async-handler");
 const router = express.Router();
 const AdminUser = require("../model/adminUser");
-
-const getTokenFromRequest = (req) => {
-  const authHeader = req.headers.authorization || "";
-  if (authHeader.startsWith("Bearer ")) {
-    return authHeader.slice(7).trim();
-  }
-
-  return req.headers["x-admin-token"]?.toString()?.trim() || null;
-};
-
-const getCurrentAdmin = async (req) => {
-  const token = getTokenFromRequest(req);
-  if (!token) return null;
-
-  return AdminUser.findById(token);
-};
-
-const requireAdminAuth = asyncHandler(async (req, res, next) => {
-  const adminUser = await getCurrentAdmin(req);
-  if (!adminUser || !adminUser.isActive) {
-    return res.status(401).json({
-      success: false,
-      message: "Unauthorized. Please login again.",
-    });
-  }
-
-  req.adminUser = adminUser;
-  next();
-});
-
-const requireSuperAdmin = asyncHandler(async (req, res, next) => {
-  if (req.adminUser?.clearanceLevel !== "super_admin") {
-    return res.status(403).json({
-      success: false,
-      message: "Access denied. Super admin privileges required.",
-    });
-  }
-
-  next();
-});
-
-const toPublicAdminUser = (adminUser) => ({
-  _id: adminUser._id,
-  username: adminUser.username,
-  name: adminUser.name,
-  email: adminUser.email,
-  clearanceLevel: adminUser.clearanceLevel,
-  isActive: adminUser.isActive,
-  createdBy: adminUser.createdBy,
-  createdAt: adminUser.createdAt,
-  updatedAt: adminUser.updatedAt,
-});
+const {
+  requireAdminAuth,
+  requireSuperAdmin,
+  toPublicAdminUser,
+} = require("../middleware/adminAccess");
 
 router.post(
   "/login",
@@ -87,11 +40,11 @@ router.post(
     return res.json({
       success: true,
       message: "Login successful.",
-      data: {
-        token: adminUser._id.toString(),
-        user: toPublicAdminUser(adminUser),
-      },
-    });
+        data: {
+          token: adminUser._id.toString(),
+          user: toPublicAdminUser(adminUser),
+        },
+      });
   }),
 );
 
@@ -158,8 +111,7 @@ router.post(
   requireAdminAuth,
   requireSuperAdmin,
   asyncHandler(async (req, res) => {
-    const { username, name, email, password, clearanceLevel, createdBy } =
-      req.body;
+    const { username, name, email, password, clearanceLevel } = req.body;
 
     if (!username || !name || !email || !password) {
       return res.status(400).json({
@@ -185,7 +137,7 @@ router.post(
       email,
       password,
       clearanceLevel: clearanceLevel || "admin",
-      createdBy: createdBy || req.adminUser._id,
+      createdBy: req.adminUser._id,
     });
 
     return res.status(201).json({

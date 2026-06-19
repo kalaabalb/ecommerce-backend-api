@@ -3,13 +3,20 @@ const router = express.Router();
 const Variant = require("../model/variant");
 const Product = require("../model/product");
 const asyncHandler = require("express-async-handler");
+const {
+  buildOwnedQuery,
+  canAccessOwnedDocument,
+  loadAdmin,
+  requireAdminAuth,
+} = require("../middleware/adminAccess");
 
 // Get all variants
 router.get(
   "/",
+  loadAdmin,
   asyncHandler(async (req, res) => {
     try {
-      const variants = await Variant.find()
+      const variants = await Variant.find(buildOwnedQuery(req, {}))
         .populate("variantTypeId")
         .sort({ _id: -1 });
 
@@ -27,6 +34,7 @@ router.get(
 // Get a variant by ID
 router.get(
   "/:id",
+  loadAdmin,
   asyncHandler(async (req, res) => {
     try {
       const variantID = req.params.id;
@@ -37,6 +45,12 @@ router.get(
         return res
           .status(404)
           .json({ success: false, message: "Variant not found." });
+      }
+      if (!canAccessOwnedDocument(req, variant)) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only access variants you created.",
+        });
       }
       res.json({
         success: true,
@@ -52,6 +66,7 @@ router.get(
 // Create a new variant
 router.post(
   "/",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     const { name, variantTypeId } = req.body;
 
@@ -65,7 +80,11 @@ router.post(
     }
 
     try {
-      const variant = new Variant({ name, variantTypeId });
+      const variant = new Variant({
+        name,
+        variantTypeId,
+        createdBy: req.adminUser._id,
+      });
       const newVariant = await variant.save();
       res.json({
         success: true,
@@ -81,6 +100,7 @@ router.post(
 // Update a variant
 router.put(
   "/:id",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     const variantID = req.params.id;
     const { name, variantTypeId } = req.body;
@@ -101,10 +121,20 @@ router.put(
           .status(404)
           .json({ success: false, message: "Variant not found." });
       }
+      if (!canAccessOwnedDocument(req, variant)) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only edit variants you created.",
+        });
+      }
 
       const updatedVariant = await Variant.findByIdAndUpdate(
         variantID,
-        { name, variantTypeId },
+        {
+          name,
+          variantTypeId,
+          createdBy: variant.createdBy || req.adminUser._id,
+        },
         { new: true },
       );
 
@@ -122,6 +152,7 @@ router.put(
 // Delete a variant
 router.delete(
   "/:id",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     const variantID = req.params.id;
 
@@ -131,6 +162,12 @@ router.delete(
         return res
           .status(404)
           .json({ success: false, message: "Variant not found." });
+      }
+      if (!canAccessOwnedDocument(req, variant)) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only delete variants you created.",
+        });
       }
 
       // Check if any products reference this variant
