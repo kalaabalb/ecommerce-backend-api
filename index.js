@@ -6,6 +6,7 @@ const dotenv = require('dotenv');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
+const AdminUser = require('./model/adminUser');
 
 dotenv.config();
 
@@ -30,7 +31,12 @@ const limiter = rateLimit({
     return req.socket.remoteAddress;
   },
   skip: (req) => {
-    if (req.url === '/health' || req.url === '/' || req.url.includes('/users/login')) {
+    if (
+      req.url === '/health' ||
+      req.url === '/' ||
+      req.url.includes('/users/login') ||
+      req.url.includes('/admin-users/login')
+    ) {
       return true;
     }
     if (process.env.NODE_ENV !== 'production') {
@@ -150,6 +156,7 @@ app.use('/variants', require('./routes/variant'));
 app.use('/products', require('./routes/product'));
 app.use('/posters', require('./routes/poster'));
 app.use('/users', require('./routes/user'));
+app.use('/admin-users', require('./routes/adminUser'));
 app.use('/orders', require('./routes/order'));
 app.use('/payment', require('./routes/payment'));
 app.use('/notification', require('./routes/notification'));
@@ -190,7 +197,36 @@ app.get('/', asyncHandler(async (req, res) => {
 // Initialize database connection
 db.once('open', async () => {
   console.log('✅ Connected to Database');
+  await ensureDefaultAdminUser();
 });
+
+const ensureDefaultAdminUser = async () => {
+  try {
+    const defaults = [
+      {
+        username: 'superadmin',
+        name: 'Super Admin',
+        email: 'superadmin@yourapp.com',
+        password: 'admin123',
+        clearanceLevel: 'super_admin'
+      }
+    ];
+
+    for (const admin of defaults) {
+      const existing = await AdminUser.findOne({ username: admin.username });
+      if (!existing) {
+        await AdminUser.create(admin);
+        console.log(`✅ Seeded admin user: ${admin.username}`);
+      } else if (!existing.isActive) {
+        existing.isActive = true;
+        await existing.save();
+        console.log(`✅ Reactivated admin user: ${admin.username}`);
+      }
+    }
+  } catch (error) {
+    console.error('❌ Failed to ensure default admin user:', error.message);
+  }
+};
 
 // 404 handler
 app.use('*', (req, res) => {
@@ -206,6 +242,7 @@ app.use('*', (req, res) => {
       '/products',
       '/posters',
       '/users',
+      '/admin-users',
       '/orders',
       '/payment',
       '/notification',
