@@ -3,6 +3,9 @@ const asyncHandler = require("express-async-handler");
 const router = express.Router();
 const Rating = require("../model/rating");
 const mongoose = require("mongoose");
+const {
+  requireUserAuth,
+} = require("../middleware/adminAccess");
 
 // Get ratings for a product with pagination
 router.get(
@@ -94,9 +97,17 @@ router.get(
 // Get user's rating for a product
 router.get(
   "/product/:productId/user/:userId",
+  requireUserAuth,
   asyncHandler(async (req, res) => {
     try {
       const { productId, userId } = req.params;
+
+      if (req.authUser._id.toString() !== userId) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only view your own rating.",
+        });
+      }
 
       const rating = await Rating.findOne({
         productId,
@@ -121,19 +132,31 @@ router.get(
 // Create or update rating
 router.post(
   "/",
+  requireUserAuth,
   asyncHandler(async (req, res) => {
     try {
       const { productId, userId, userName, rating, review } = req.body;
 
-      if (!productId || !userId || !userName || !rating) {
+      if (!productId || !rating) {
         return res.status(400).json({
           success: false,
-          message: "Product ID, User ID, User Name, and Rating are required.",
+          message: "Product ID and Rating are required.",
+        });
+      }
+
+      if (userId && userId !== req.authUser._id.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only submit ratings for your own account.",
         });
       }
 
       // Check if user already rated this product
-      const existingRating = await Rating.findOne({ productId, userId });
+      const currentUserId = req.authUser._id.toString();
+      const existingRating = await Rating.findOne({
+        productId,
+        userId: currentUserId,
+      });
 
       if (existingRating) {
         // Update existing rating
@@ -150,8 +173,8 @@ router.post(
         // Create new rating
         const newRating = new Rating({
           productId,
-          userId,
-          userName,
+          userId: currentUserId,
+          userName: userName || req.authUser.name,
           rating,
           review: review || "",
         });
@@ -180,23 +203,32 @@ router.post(
 // Update a rating
 router.put(
   "/:id",
+  requireUserAuth,
   asyncHandler(async (req, res) => {
     try {
       const ratingId = req.params.id;
       const { rating, review } = req.body;
+
+      const existingRating = await Rating.findById(ratingId);
+      if (!existingRating) {
+        return res.status(404).json({
+          success: false,
+          message: "Rating not found.",
+        });
+      }
+
+      if (existingRating.userId.toString() !== req.authUser._id.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only update your own rating.",
+        });
+      }
 
       const updatedRating = await Rating.findByIdAndUpdate(
         ratingId,
         { rating, review },
         { new: true },
       );
-
-      if (!updatedRating) {
-        return res.status(404).json({
-          success: false,
-          message: "Rating not found.",
-        });
-      }
 
       res.json({
         success: true,
@@ -213,18 +245,27 @@ router.put(
 // Delete a rating
 router.delete(
   "/:id",
+  requireUserAuth,
   asyncHandler(async (req, res) => {
     try {
       const ratingId = req.params.id;
 
-      const deletedRating = await Rating.findByIdAndDelete(ratingId);
-
-      if (!deletedRating) {
+      const rating = await Rating.findById(ratingId);
+      if (!rating) {
         return res.status(404).json({
           success: false,
           message: "Rating not found.",
         });
       }
+
+      if (rating.userId.toString() !== req.authUser._id.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only delete your own rating.",
+        });
+      }
+
+      const deletedRating = await Rating.findByIdAndDelete(ratingId);
 
       res.json({
         success: true,

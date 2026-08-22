@@ -2,6 +2,9 @@ const express = require("express");
 const asyncHandler = require("express-async-handler");
 const router = express.Router();
 const { uploadPaymentProof, cloudinary } = require("../uploadFile");
+const {
+  requireAdminAuth,
+} = require("../middleware/adminAccess");
 
 // Upload payment proof to Cloudinary
 router.post(
@@ -78,6 +81,7 @@ router.post(
 // Verify payment (admin endpoint)
 router.post(
   "/verify-payment/:orderId",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     try {
       const orderId = req.params.orderId;

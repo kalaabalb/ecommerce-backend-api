@@ -1,4 +1,22 @@
+const jwt = require("jsonwebtoken");
 const AdminUser = require("../model/adminUser");
+const User = require("../model/user");
+
+const DEFAULT_JWT_SECRET = "yomoblies-development-only-secret";
+const JWT_SECRET = process.env.JWT_SECRET || process.env.ACCESS_TOKEN_SECRET;
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
+
+const getJwtSecret = () => {
+  if (JWT_SECRET) {
+    return JWT_SECRET;
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("JWT_SECRET environment variable is required in production");
+  }
+
+  return DEFAULT_JWT_SECRET;
+};
 
 const getTokenFromRequest = (req) => {
   const authHeader = req.headers.authorization || "";
@@ -7,19 +25,128 @@ const getTokenFromRequest = (req) => {
     return authHeader.slice(7).trim();
   }
 
-  return req.headers["x-admin-token"]?.toString()?.trim() || null;
+  return null;
 };
 
 const getCurrentAdmin = async (req) => {
   const token = getTokenFromRequest(req);
-  if (!token) return null;
 
-  return AdminUser.findById(token);
+  if (!token) {
+    return null;
+  }
+
+  const payload = verifyAccessToken(token);
+
+  if (payload.role !== "admin") {
+    return null;
+  }
+
+  return AdminUser.findById(payload.sub);
+};
+
+const signAccessToken = (payload, expiresIn = JWT_EXPIRES_IN) =>
+  jwt.sign({ ...payload, tokenType: "access" }, getJwtSecret(), { expiresIn });
+
+const issueUserToken = (user) =>
+  signAccessToken({
+    sub: user._id.toString(),
+    role: "user",
+  });
+
+const issueAdminToken = (adminUser) =>
+  signAccessToken({
+    sub: adminUser._id.toString(),
+    role: "admin",
+    clearanceLevel: adminUser.clearanceLevel,
+  });
+
+const verifyAccessToken = (token) => jwt.verify(token, getJwtSecret());
+
+const toPublicUser = (user) => ({
+  _id: user._id,
+  name: user.name,
+  email: user.email,
+  phone: user.phone,
+  emailVerified: user.emailVerified,
+  phoneVerified: user.phoneVerified,
+  createdAt: user.createdAt,
+  updatedAt: user.updatedAt,
+});
+
+const toPublicAdminUser = (adminUser) => ({
+  _id: adminUser._id,
+  username: adminUser.username,
+  name: adminUser.name,
+  email: adminUser.email,
+  clearanceLevel: adminUser.clearanceLevel,
+  isActive: adminUser.isActive,
+  createdBy: adminUser.createdBy,
+  createdAt: adminUser.createdAt,
+  updatedAt: adminUser.updatedAt,
+});
+
+const loadUser = async (req, res, next) => {
+  try {
+    const token = getTokenFromRequest(req);
+
+    if (!token) {
+      req.authUser = null;
+      return next();
+    }
+
+    const payload = verifyAccessToken(token);
+    if (payload.role !== "user") {
+      req.authUser = null;
+      return next();
+    }
+
+    const user = await User.findById(payload.sub);
+    if (!user) {
+      req.authUser = null;
+      return next();
+    }
+
+    req.authUser = user;
+    next();
+  } catch (error) {
+    req.authUser = null;
+    next();
+  }
+};
+
+const requireUserAuth = async (req, res, next) => {
+  try {
+    await loadUser(req, res, () => {});
+
+    if (!req.authUser) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized. Please login again.",
+      });
+    }
+
+    next();
+  } catch (error) {
+    next(error);
+  }
 };
 
 const loadAdmin = async (req, res, next) => {
   try {
-    const adminUser = await getCurrentAdmin(req);
+    const token = getTokenFromRequest(req);
+
+    if (!token) {
+      req.adminUser = null;
+      return next();
+    }
+
+    const payload = verifyAccessToken(token);
+    if (payload.role !== "admin") {
+      req.adminUser = null;
+      return next();
+    }
+
+    const adminUser = await AdminUser.findById(payload.sub);
 
     if (adminUser && adminUser.isActive) {
       req.adminUser = adminUser;
@@ -29,7 +156,8 @@ const loadAdmin = async (req, res, next) => {
 
     next();
   } catch (error) {
-    next(error);
+    req.adminUser = null;
+    next();
   }
 };
 
@@ -64,18 +192,6 @@ const requireSuperAdmin = async (req, res, next) => {
     next(error);
   }
 };
-
-const toPublicAdminUser = (adminUser) => ({
-  _id: adminUser._id,
-  username: adminUser.username,
-  name: adminUser.name,
-  email: adminUser.email,
-  clearanceLevel: adminUser.clearanceLevel,
-  isActive: adminUser.isActive,
-  createdBy: adminUser.createdBy,
-  createdAt: adminUser.createdAt,
-  updatedAt: adminUser.updatedAt,
-});
 
 const buildOwnedQuery = (req, query = {}) => {
   if (!req.adminUser || req.adminUser.clearanceLevel === "super_admin") {
@@ -114,10 +230,18 @@ module.exports = {
   assignOwnedDocument,
   buildOwnedQuery,
   canAccessOwnedDocument,
+  getJwtSecret,
   getCurrentAdmin,
   getTokenFromRequest,
+  issueAdminToken,
+  issueUserToken,
   loadAdmin,
+  loadUser,
   requireAdminAuth,
+  requireUserAuth,
   requireSuperAdmin,
+  signAccessToken,
+  toPublicUser,
   toPublicAdminUser,
+  verifyAccessToken,
 };

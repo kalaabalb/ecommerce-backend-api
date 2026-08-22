@@ -3,6 +3,7 @@ const asyncHandler = require("express-async-handler");
 const router = express.Router();
 const AdminUser = require("../model/adminUser");
 const {
+  issueAdminToken,
   requireAdminAuth,
   requireSuperAdmin,
   toPublicAdminUser,
@@ -37,14 +38,16 @@ router.post(
       });
     }
 
+    const token = issueAdminToken(adminUser);
+
     return res.json({
       success: true,
       message: "Login successful.",
-        data: {
-          token: adminUser._id.toString(),
-          user: toPublicAdminUser(adminUser),
-        },
-      });
+      data: {
+        token,
+        user: toPublicAdminUser(adminUser),
+      },
+    });
   }),
 );
 

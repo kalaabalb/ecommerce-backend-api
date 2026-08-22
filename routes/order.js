@@ -3,12 +3,38 @@ const asyncHandler = require("express-async-handler");
 const router = express.Router();
 const Order = require("../model/order");
 const Product = require("../model/product");
+const {
+  requireAdminAuth,
+  requireUserAuth,
+  loadAdmin,
+  loadUser,
+} = require("../middleware/adminAccess");
 
 // Get all orders
 router.get(
   "/",
   asyncHandler(async (req, res) => {
     try {
+      await loadUser(req, res, () => {});
+      if (req.authUser) {
+        const orders = await Order.find({ userID: req.authUser._id })
+          .populate("userID", "id name")
+          .sort({ _id: -1 });
+        return res.json({
+          success: true,
+          message: "Orders retrieved successfully.",
+          data: orders,
+        });
+      }
+
+      await loadAdmin(req, res, () => {});
+      if (!req.adminUser) {
+        return res.status(401).json({
+          success: false,
+          message: "Unauthorized. Please login again.",
+        });
+      }
+
       const orders = await Order.find()
         .populate("userID", "id name")
         .sort({ _id: -1 });
@@ -26,9 +52,16 @@ router.get(
 // Get orders by user ID
 router.get(
   "/orderByUserId/:userId",
+  requireUserAuth,
   asyncHandler(async (req, res) => {
     try {
       const userId = req.params.userId;
+      if (req.authUser._id.toString() !== userId) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only view your own orders.",
+        });
+      }
       const orders = await Order.find({ userID: userId })
         .populate("userID", "id name")
         .sort({ _id: -1 });
@@ -46,6 +79,7 @@ router.get(
 // Get an order by ID
 router.get(
   "/:id",
+  requireUserAuth,
   asyncHandler(async (req, res) => {
     try {
       const orderID = req.params.id;
@@ -54,6 +88,16 @@ router.get(
         return res
           .status(404)
           .json({ success: false, message: "Order not found." });
+      }
+
+      if (
+        order.userID &&
+        order.userID._id.toString() !== req.authUser._id.toString()
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only view your own orders.",
+        });
       }
       res.json({
         success: true,
@@ -69,6 +113,7 @@ router.get(
 // Create a new order
 router.post(
   "/",
+  requireUserAuth,
   asyncHandler(async (req, res) => {
     const {
       userID,
@@ -83,14 +128,7 @@ router.post(
       trackingUrl,
     } = req.body;
 
-    if (
-      !userID ||
-      !items ||
-      !totalPrice ||
-      !shippingAddress ||
-      !paymentMethod ||
-      !orderTotal
-    ) {
+    if (!items || !totalPrice || !shippingAddress || !paymentMethod || !orderTotal) {
       return res
         .status(400)
         .json({
@@ -108,6 +146,13 @@ router.post(
         .json({ success: false, message: "Invalid payment method." });
     }
 
+    if (userID && userID !== req.authUser._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: "You can only create orders for your own account.",
+      });
+    }
+
     // Set default payment status if not provided
     const finalPaymentStatus =
       paymentStatus || (paymentMethod === "cod" ? "pending" : "pending");
@@ -116,7 +161,7 @@ router.post(
 
     try {
       const order = new Order({
-        userID,
+        userID: req.authUser._id,
         orderStatus: finalOrderStatus,
         items,
         totalPrice,
@@ -142,6 +187,7 @@ router.post(
 // Update an order status
 router.put(
   "/:id",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     try {
       const orderID = req.params.id;
@@ -178,6 +224,7 @@ router.put(
 // Verify payment (admin endpoint)
 router.put(
   "/:id/verify-payment",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     try {
       const orderID = req.params.id;
@@ -227,6 +274,7 @@ router.put(
 // Update payment proof
 router.put(
   "/:id/payment-proof",
+  requireUserAuth,
   asyncHandler(async (req, res) => {
     try {
       const orderID = req.params.id;
@@ -243,6 +291,13 @@ router.put(
         return res
           .status(404)
           .json({ success: false, message: "Order not found." });
+      }
+
+      if (order.userID.toString() !== req.authUser._id.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only update your own order payment proof.",
+        });
       }
 
       // Update or create payment proof
@@ -276,6 +331,7 @@ router.put(
 // Get orders by payment status
 router.get(
   "/payment-status/:status",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     try {
       const paymentStatus = req.params.status;
@@ -305,6 +361,7 @@ router.get(
 // Get orders requiring payment verification (admin endpoint)
 router.get(
   "/admin/pending-verification",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     try {
       const orders = await Order.find({
@@ -329,6 +386,7 @@ router.get(
 // Delete an order
 router.delete(
   "/:id",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     try {
       const orderID = req.params.id;

@@ -2,10 +2,18 @@ const express = require("express");
 const asyncHandler = require("express-async-handler");
 const router = express.Router();
 const User = require("../model/user");
+const AdminUser = require("../model/adminUser");
+const {
+  issueUserToken,
+  requireAdminAuth,
+  requireUserAuth,
+  toPublicUser,
+} = require("../middleware/adminAccess");
 
 // Get all users
 router.get(
   "/",
+  requireAdminAuth,
   asyncHandler(async (req, res) => {
     try {
       const users = await User.find().select("-password");
@@ -44,22 +52,17 @@ router.post(
       }
 
       // Authentication successful
-      const userResponse = {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        emailVerified: user.emailVerified,
-        phone: user.phone,
-        phoneVerified: user.phoneVerified,
-        createdAt: user.createdAt,
-      };
+      const token = issueUserToken(user);
 
       res
         .status(200)
         .json({
           success: true,
           message: "Login successful.",
-          data: userResponse,
+          data: {
+            token,
+            user: toPublicUser(user),
+          },
         });
     } catch (error) {
       res.status(500).json({ success: false, message: error.message });
@@ -67,12 +70,83 @@ router.post(
   }),
 );
 
+// Get current authenticated user profile
+router.get(
+  "/profile",
+  requireUserAuth,
+  asyncHandler(async (req, res) => {
+    return res.json({
+      success: true,
+      message: "Profile retrieved successfully.",
+      data: toPublicUser(req.authUser),
+    });
+  }),
+);
+
+router.put(
+  "/profile",
+  requireUserAuth,
+  asyncHandler(async (req, res) => {
+    const { name, currentPassword, password } = req.body;
+
+    if (!name) {
+      return res.status(400).json({
+        success: false,
+        message: "Name is required.",
+      });
+    }
+
+    const user = await User.findById(req.authUser._id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found.",
+      });
+    }
+
+    if (password) {
+      if (!currentPassword) {
+        return res.status(400).json({
+          success: false,
+          message: "Current password is required to set new password.",
+        });
+      }
+
+      if (!(await user.correctPassword(currentPassword))) {
+        return res.status(400).json({
+          success: false,
+          message: "Current password is incorrect.",
+        });
+      }
+
+      user.password = password;
+    }
+
+    user.name = name;
+    await user.save();
+
+    return res.json({
+      success: true,
+      message: "Profile updated successfully.",
+      data: toPublicUser(user),
+    });
+  }),
+);
+
 // Get a user by ID
 router.get(
   "/:id",
+  requireUserAuth,
   asyncHandler(async (req, res) => {
     try {
       const userID = req.params.id;
+      if (req.authUser._id.toString() !== userID) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only view your own profile.",
+        });
+      }
+
       const user = await User.findById(userID).select("-password");
       if (!user) {
         return res
@@ -132,10 +206,17 @@ router.post(
 // Update a user
 router.put(
   "/:id",
+  requireUserAuth,
   asyncHandler(async (req, res) => {
     try {
       const userID = req.params.id;
       const { name, password, currentPassword } = req.body;
+      if (req.authUser._id.toString() !== userID) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only update your own profile.",
+        });
+      }
       if (!name) {
         return res
           .status(400)
@@ -195,9 +276,16 @@ router.put(
 // Delete a user
 router.delete(
   "/:id",
+  requireUserAuth,
   asyncHandler(async (req, res) => {
     try {
       const userID = req.params.id;
+      if (req.authUser._id.toString() !== userID) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only delete your own account.",
+        });
+      }
       const deletedUser = await User.findByIdAndDelete(userID);
       if (!deletedUser) {
         return res
