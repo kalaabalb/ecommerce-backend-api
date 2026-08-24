@@ -2,20 +2,20 @@ const jwt = require("jsonwebtoken");
 const AdminUser = require("../model/adminUser");
 const User = require("../model/user");
 
-const DEFAULT_JWT_SECRET = "yomoblies-development-only-secret";
-const JWT_SECRET = process.env.JWT_SECRET || process.env.ACCESS_TOKEN_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
 
+if (process.env.NODE_ENV === "production" && !process.env.JWT_SECRET) {
+  throw new Error("JWT_SECRET environment variable is required in production");
+}
+
 const getJwtSecret = () => {
-  if (JWT_SECRET) {
-    return JWT_SECRET;
+  const jwtSecret = process.env.JWT_SECRET;
+
+  if (!jwtSecret) {
+    throw new Error("JWT_SECRET environment variable is required");
   }
 
-  if (process.env.NODE_ENV === "production") {
-    throw new Error("JWT_SECRET environment variable is required in production");
-  }
-
-  return DEFAULT_JWT_SECRET;
+  return jwtSecret;
 };
 
 const getTokenFromRequest = (req) => {
@@ -220,28 +220,18 @@ const canAccessOwnedDocument = (req, document) => {
   return document.createdBy.toString() === req.adminUser._id.toString();
 };
 
-const assignOwnedDocument = (req, document) => {
-  if (req.adminUser && !document.createdBy) {
-    document.createdBy = req.adminUser._id;
-  }
-};
-
 module.exports = {
-  assignOwnedDocument,
+  issueUserToken,
+  issueAdminToken,
+  requireUserAuth,
+  requireAdminAuth,
+  requireSuperAdmin,
+  loadUser,
+  loadAdmin,
+  getCurrentAdmin,
+  toPublicUser,
+  toPublicAdminUser,
   buildOwnedQuery,
   canAccessOwnedDocument,
   getJwtSecret,
-  getCurrentAdmin,
-  getTokenFromRequest,
-  issueAdminToken,
-  issueUserToken,
-  loadAdmin,
-  loadUser,
-  requireAdminAuth,
-  requireUserAuth,
-  requireSuperAdmin,
-  signAccessToken,
-  toPublicUser,
-  toPublicAdminUser,
-  verifyAccessToken,
 };

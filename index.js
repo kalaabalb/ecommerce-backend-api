@@ -216,8 +216,13 @@ app.get(
 
 // Initialize database connection
 db.once("open", async () => {
-  console.log("✅ Connected to Database");
-  await ensureDefaultAdminUser();
+  try {
+    console.log("✅ Connected to Database");
+    await ensureDefaultAdminUser();
+  } catch (error) {
+    console.error("❌ Startup failed:", error.message);
+    process.exit(1);
+  }
 });
 
 app.use(notFound);

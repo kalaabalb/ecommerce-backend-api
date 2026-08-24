@@ -1,13 +1,29 @@
-const DEFAULT_ADMIN_USERS = [
-  {
-    username: process.env.ADMIN_USERNAME || "superadmin",
-    name: process.env.ADMIN_NAME || "Super Admin",
-    email: process.env.ADMIN_EMAIL || "superadmin@yourapp.com",
-    password: process.env.ADMIN_PASSWORD || "admin123",
-    clearanceLevel: "super_admin",
-  },
+const REQUIRED_ADMIN_ENV_VARS = [
+  "ADMIN_USERNAME",
+  "ADMIN_NAME",
+  "ADMIN_EMAIL",
+  "ADMIN_PASSWORD",
 ];
 
+const getConfiguredDefaultAdmin = () => {
+  const missingVariables = REQUIRED_ADMIN_ENV_VARS.filter(
+    (variable) => !process.env[variable],
+  );
+
+  if (missingVariables.length > 0) {
+    return null;
+  }
+
+  return {
+    username: process.env.ADMIN_USERNAME,
+    name: process.env.ADMIN_NAME,
+    email: process.env.ADMIN_EMAIL,
+    password: process.env.ADMIN_PASSWORD,
+    clearanceLevel: "super_admin",
+  };
+};
+
 module.exports = {
-  DEFAULT_ADMIN_USERS,
+  REQUIRED_ADMIN_ENV_VARS,
+  getConfiguredDefaultAdmin,
 };

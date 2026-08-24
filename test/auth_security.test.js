@@ -22,6 +22,7 @@ const {
 const originalMethods = {
   userFindOne: User.findOne,
   userFindById: User.findById,
+  adminFindOne: AdminUser.findOne,
   adminFindById: AdminUser.findById,
   orderFindById: Order.findById,
   orderFind: Order.find,
@@ -40,6 +41,7 @@ function createApp() {
 function restoreStubs() {
   User.findOne = originalMethods.userFindOne;
   User.findById = originalMethods.userFindById;
+  AdminUser.findOne = originalMethods.adminFindOne;
   AdminUser.findById = originalMethods.adminFindById;
   Order.findById = originalMethods.orderFindById;
   Order.find = originalMethods.orderFind;
@@ -76,6 +78,33 @@ test("valid user login returns a signed token", async () => {
   const tokenData = jwt.verify(response.body.data.token, "test-secret");
   assert.equal(tokenData.role, "user");
   assert.equal(tokenData.sub, fakeUser._id.toString());
+});
+
+test("valid admin login returns a signed token", async () => {
+  const fakeAdmin = {
+    _id: new mongoose.Types.ObjectId(),
+    username: "superadmin",
+    name: "Super Admin",
+    email: "admin@example.com",
+    clearanceLevel: "super_admin",
+    isActive: true,
+    correctPassword: async () => true,
+  };
+
+  AdminUser.findOne = async () => fakeAdmin;
+
+  const app = createApp();
+  const response = await request(app)
+    .post("/admin-users/login")
+    .send({ username: "superadmin", password: "secret" });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.success, true);
+  assert.ok(response.body.data.token);
+
+  const tokenData = jwt.verify(response.body.data.token, "test-secret");
+  assert.equal(tokenData.role, "admin");
+  assert.equal(tokenData.sub, fakeAdmin._id.toString());
 });
 
 test("invalid user credentials are rejected", async () => {

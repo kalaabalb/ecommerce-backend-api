@@ -1,53 +1,79 @@
 const AdminUser = require("../model/adminUser");
-const { DEFAULT_ADMIN_USERS } = require("../config/defaultAdmin");
+const {
+  REQUIRED_ADMIN_ENV_VARS,
+  getConfiguredDefaultAdmin,
+} = require("../config/defaultAdmin");
+
+const getMissingAdminProvisioningMessage = () =>
+  `Missing required admin provisioning environment variables: ${REQUIRED_ADMIN_ENV_VARS.join(
+    ", ",
+  )}`;
 
 const ensureDefaultAdminUser = async () => {
   try {
-    for (const admin of DEFAULT_ADMIN_USERS) {
-      const existing = await AdminUser.findOne({ username: admin.username });
+    const configuredAdmin = getConfiguredDefaultAdmin();
 
-      if (!existing) {
-        await AdminUser.create(admin);
-        console.log(`Seeded admin user: ${admin.username}`);
-        continue;
+    if (!configuredAdmin) {
+      const existingAdmin = await AdminUser.exists({});
+
+      if (existingAdmin) {
+        return;
       }
 
-      let changed = false;
+      const error = new Error(getMissingAdminProvisioningMessage());
 
-      if (!existing.isActive) {
-        existing.isActive = true;
-        changed = true;
+      if (process.env.NODE_ENV === "production") {
+        throw error;
       }
 
-      if (existing.name !== admin.name) {
-        existing.name = admin.name;
-        changed = true;
-      }
+      console.warn(error.message);
+      return;
+    }
 
-      if (existing.email !== admin.email) {
-        existing.email = admin.email;
-        changed = true;
-      }
+    const existing = await AdminUser.findOne({ username: configuredAdmin.username });
 
-      if (existing.clearanceLevel !== admin.clearanceLevel) {
-        existing.clearanceLevel = admin.clearanceLevel;
-        changed = true;
-      }
+    if (!existing) {
+      await AdminUser.create(configuredAdmin);
+      console.log(`Seeded admin user: ${configuredAdmin.username}`);
+      return;
+    }
 
-      const passwordMatches = await existing.correctPassword(admin.password);
-      if (!passwordMatches) {
-        existing.password = admin.password;
-        changed = true;
-        console.log(`Reset password for admin user: ${admin.username}`);
-      }
+    let changed = false;
 
-      if (changed) {
-        await existing.save();
-        console.log(`Updated admin user: ${admin.username}`);
-      }
+    if (!existing.isActive) {
+      existing.isActive = true;
+      changed = true;
+    }
+
+    if (existing.name !== configuredAdmin.name) {
+      existing.name = configuredAdmin.name;
+      changed = true;
+    }
+
+    if (existing.email !== configuredAdmin.email) {
+      existing.email = configuredAdmin.email;
+      changed = true;
+    }
+
+    if (existing.clearanceLevel !== configuredAdmin.clearanceLevel) {
+      existing.clearanceLevel = configuredAdmin.clearanceLevel;
+      changed = true;
+    }
+
+    const passwordMatches = await existing.correctPassword(configuredAdmin.password);
+    if (!passwordMatches) {
+      existing.password = configuredAdmin.password;
+      changed = true;
+      console.log(`Reset password for admin user: ${configuredAdmin.username}`);
+    }
+
+    if (changed) {
+      await existing.save();
+      console.log(`Updated admin user: ${configuredAdmin.username}`);
     }
   } catch (error) {
     console.error("Failed to ensure default admin user:", error.message);
+    throw error;
   }
 };
 
